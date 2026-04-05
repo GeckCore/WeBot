@@ -8,24 +8,21 @@ module.exports = {
     name: 'downloads',
     match: (text) => /^(https?:\/\/[^\s]+)$/i.test(text) && !text.toLowerCase().includes('resume'),
     execute: async ({ sock, remitente, textoLimpio }) => {
-        // Limpieza de URL (quitamos parámetros de rastreo que rompen yt-dlp)
         const urlMatch = textoLimpio.match(/^(https?:\/\/[^\s]+)$/i);
         if (!urlMatch) return;
         
         let urlLimpia = urlMatch[1].split(/[?&]si=/)[0].split(/[&?]feature=/)[0];
-        let statusMsg = await sock.sendMessage(remitente, { text: "⏳ Analizando y descargando..." });
+        let statusMsg = await sock.sendMessage(remitente, { text: "⏳ Procesando enlace de YouTube..." });
 
         const isAudio = ['music.youtube.com', 'soundcloud.com', 'spotify.com', 'tidal.com', 'deezer.com', 'apple.com/music'].some(d => urlLimpia.includes(d));
         const outName = path.join(__dirname, `../dl_${Date.now()}`);
         const ext = isAudio ? 'wav' : 'mp4';
         
-        // Rutas a Binarios y Cookies en la raíz
         const ytDlpPath = path.join(__dirname, '../yt-dlp');
         const ffmpegPath = path.join(__dirname, '../ffmpeg');
         const ytCookies = path.join(__dirname, '../youtube_cookies.txt');
         const igCookies = path.join(__dirname, '../instagram_cookies.txt');
 
-        // Selección de Cookies según plataforma
         let cookieArg = "";
         if (urlLimpia.includes('youtube.com') || urlLimpia.includes('youtu.be')) {
             if (fs.existsSync(ytCookies)) cookieArg = `--cookies "${ytCookies}"`;
@@ -33,12 +30,13 @@ module.exports = {
             if (fs.existsSync(igCookies)) cookieArg = `--cookies "${igCookies}"`;
         }
 
-        // Configuración de formato y calidad
+        // --- CAMBIO CLAVE AQUÍ ---
+        // Eliminamos la restricción de [ext=mp4] para evitar el error de "format not available"
+        // Dejamos que descargue lo mejor y FFmpeg lo convierta a mp4 al final.
         const format = isAudio 
             ? `-f "bestaudio/best" -x --audio-format wav` 
-            : `-f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best" --merge-output-format mp4`;
+            : `-f "bestvideo+bestaudio/best" --merge-output-format mp4`;
 
-        // Comando base con inyección de cookies y FFmpeg
         const cmdBase = `${ytDlpPath} ${cookieArg} --ffmpeg-location "${ffmpegPath}" --no-playlist --no-warnings --geo-bypass -o "${outName}.%(ext)s" ${format}`;
 
         const attempts = [
@@ -62,24 +60,25 @@ module.exports = {
             }
         }
 
-        // Manejo de errores basado en la respuesta real del binario
         if (!success) {
-            let errorMensaje = "❌ Error crítico.";
-            if (lastError.includes("Permission denied")) errorMensaje = "❌ Error: El binario yt-dlp no tiene permisos de ejecución (chmod +x).";
-            else if (lastError.includes("ffmpeg not found")) errorMensaje = "❌ Error: No se encontró FFmpeg en la raíz. YouTube/IG lo necesitan.";
-            else if (lastError.includes("Sign in to confirm you are not a bot") || lastError.includes("403")) errorMensaje = "❌ YouTube detectó el bot. Verifica que 'youtube_cookies.txt' sea válido y no haya expirado.";
-            else if (lastError.includes("login required") || lastError.includes("rate-limit")) errorMensaje = "❌ Instagram bloqueó la IP o las cookies son inválidas.";
-            else errorMensaje = `❌ Error técnico:\n${lastError.substring(0, 200)}`;
-
+            let errorMensaje = "❌ Error en YouTube.";
+            if (lastError.includes("format not available")) {
+                errorMensaje = "❌ Error: YouTube no permite este formato o resolución. Intentando fallback...";
+            } else if (lastError.includes("Sign in")) {
+                errorMensaje = "❌ YouTube requiere cookies actualizadas. El archivo 'youtube_cookies.txt' puede haber expirado.";
+            } else {
+                errorMensaje = `❌ Error técnico:\n${lastError.substring(0, 150)}`;
+            }
             return sock.sendMessage(remitente, { text: errorMensaje, edit: statusMsg.key });
         }
 
         const finalFile = `${outName}.${ext}`;
-        const fileSizeInMB = fs.statSync(finalFile).size / (1024 * 1024);
+        const stats = fs.statSync(finalFile);
+        const fileSizeInMB = stats.size / (1024 * 1024);
 
         if (fileSizeInMB > 50) {
             fs.unlinkSync(finalFile);
-            return sock.sendMessage(remitente, { text: `⚠️ El archivo pesa ${fileSizeInMB.toFixed(1)}MB (Límite: 50MB).`, edit: statusMsg.key });
+            return sock.sendMessage(remitente, { text: `⚠️ El archivo pesa ${fileSizeInMB.toFixed(1)}MB. Límite: 50MB.`, edit: statusMsg.key });
         }
 
         try {
@@ -92,7 +91,7 @@ module.exports = {
             await sock.sendMessage(remitente, payload);
             await sock.sendMessage(remitente, { delete: statusMsg.key });
         } catch (sendError) {
-            await sock.sendMessage(remitente, { text: "❌ Falló el envío del archivo a WhatsApp.", edit: statusMsg.key });
+            await sock.sendMessage(remitente, { text: "❌ Error al subir a WhatsApp.", edit: statusMsg.key });
         } finally {
             if (fs.existsSync(finalFile)) fs.unlinkSync(finalFile);
         }
