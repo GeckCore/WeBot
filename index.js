@@ -92,6 +92,7 @@ try {
     console.error('[ERROR] No se pudieron aplicar permisos:', err.message);
 }
 
+        fs.chmodSync(path.join(__dirname, 'ffmpeg'), '755');
         // Bucle de evaluación de plugins
         for (const plugin of plugins) {
             if (plugin.match(textoLimpio, ctx)) {
