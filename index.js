@@ -54,7 +54,7 @@ async function iniciarBot() {
 
         const remitente = msg.key.remoteJid;
         // Ignorar grupos y estados por rendimiento
-        if (remitente.endsWith('@g.us') || remitente === 'status@broadcast') return;
+        if (remitente === 'status@broadcast') return
 
         const fromMe = msg.key.fromMe;
         const texto = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
