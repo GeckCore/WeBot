@@ -11,18 +11,17 @@ module.exports = {
         const query = match[2].trim();
         const isVideo = (command === 'play2' || command === 'video');
 
-        let statusMsg = await sock.sendMessage(remitente, { text: `🔍 Buscando "${query}"...` });
+        let statusMsg = await sock.sendMessage(remitente, { text: `🔍 Buscando "${query}" en YouTube...` });
 
         try {
-            // 1. Búsqueda en YouTube
             const searchRes = await yts({ query, hl: 'es', gl: 'ES' });
             const video = searchRes.videos[0];
 
             if (!video) {
-                return sock.sendMessage(remitente, { text: "❌ Sin resultados.", edit: statusMsg.key });
+                return sock.sendMessage(remitente, { text: "❌ No encontré nada con ese nombre.", edit: statusMsg.key });
             }
 
-            const infoTexto = `📌 *${video.title}*\n⏱️ *Duración:* ${video.timestamp}\n\n⏳ *Conectando a nodos de extracción externa...*`;
+            const infoTexto = `📌 *${video.title}*\n⏱️ *Duración:* ${video.timestamp}\n\n⏳ *Probando 7 nodos de descarga...*`;
             await sock.sendMessage(remitente, { 
                 image: { url: video.thumbnail }, 
                 caption: infoTexto,
@@ -32,65 +31,80 @@ module.exports = {
             const url = video.url;
             let finalUrl = null;
 
-            // 2. Batería de APIs con extracción específica de JSON
+            // BATERÍA DE 7 NODOS DE EXTRACCIÓN (Ordenados por estabilidad actual)
             const apis = [
-                // Nodo 1: Siputzx (Muy estable para bots WA)
+                // Nodo 1: Siputzx
                 async () => {
-                    const ep = isVideo ? 'ytmp4' : 'ytmp3';
-                    const res = await axios.get(`https://api.siputzx.my.id/api/d/${ep}?url=${encodeURIComponent(url)}`);
-                    return res.data?.data?.dl;
+                    const res = await axios.get(`https://api.siputzx.my.id/api/d/ytmp${isVideo ? '4' : '3'}?url=${url}`);
+                    return res.data?.data?.dl || res.data?.data?.url;
                 },
-                // Nodo 2: Ryzendesu
+                // Nodo 2: Delirius (Muy potente)
                 async () => {
-                    const ep = isVideo ? 'ytmp4' : 'ytmp3';
-                    const res = await axios.get(`https://api.ryzendesu.vip/api/downloader/${ep}?url=${encodeURIComponent(url)}`);
-                    return res.data?.url;
+                    const res = await axios.get(`https://deliriussapi-oficial.vercel.app/download/ytmp${isVideo ? '4' : '3'}?url=${url}`);
+                    return res.data?.data?.download?.url || res.data?.data?.url;
                 },
-                // Nodo 3: Vreden
+                // Nodo 3: Ryzendesu
                 async () => {
-                    const ep = isVideo ? 'ytmp4' : 'ytmp3';
-                    const res = await axios.get(`https://api.vreden.web.id/api/${ep}?url=${encodeURIComponent(url)}`);
-                    return res.data?.result?.download?.url;
+                    const res = await axios.get(`https://api.ryzendesu.vip/api/downloader/ytmp${isVideo ? '4' : '3'}?url=${url}`);
+                    return res.data?.url || res.data?.download?.url;
                 },
-                // Nodo 4: Agatz
+                // Nodo 4: BoxiBot (Privada/Estable)
                 async () => {
-                    const ep = isVideo ? 'ytmp4' : 'ytmp3';
-                    const res = await axios.get(`https://api.agatz.xyz/api/${ep}?url=${encodeURIComponent(url)}`);
-                    return res.data?.data?.downloadUrl;
+                    const res = await axios.get(`https://api.boxi.bot/api/ytmp${isVideo ? '4' : '3'}?url=${url}`);
+                    return res.data?.result?.url || res.data?.url;
+                },
+                // Nodo 5: Vreden
+                async () => {
+                    const res = await axios.get(`https://api.vreden.web.id/api/ytmp${isVideo ? '4' : '3'}?url=${url}`);
+                    return res.data?.result?.download?.url || res.data?.result?.url;
+                },
+                // Nodo 6: Agatz
+                async () => {
+                    const res = await axios.get(`https://api.agatz.xyz/api/ytmp${isVideo ? '4' : '3'}?url=${url}`);
+                    return res.data?.data?.downloadUrl || res.data?.data?.url;
+                },
+                // Nodo 7: Dhamz
+                async () => {
+                    const res = await axios.get(`https://api.dhamzxploit.my.id/api/ytmp${isVideo ? '4' : '3'}?url=${url}`);
+                    return res.data?.result?.url;
                 }
             ];
 
-            // 3. Ejecutar peticiones hasta que una devuelva un enlace válido
-            for (const fetchApi of apis) {
+            // Ejecución en cascada
+            for (let i = 0; i < apis.length; i++) {
                 try {
-                    const dlUrl = await fetchApi();
-                    if (dlUrl && typeof dlUrl === 'string' && dlUrl.startsWith('http')) {
+                    console.log(`[DEBUG] Probando Nodo ${i + 1}...`);
+                    const dlUrl = await apis[i]();
+                    if (dlUrl && dlUrl.startsWith('http')) {
                         finalUrl = dlUrl;
-                        break; // Tenemos el enlace, cortamos el bucle
+                        break;
                     }
                 } catch (e) {
-                    continue; // Error de red o saturación, pasa al siguiente nodo
+                    console.log(`[DEBUG] Nodo ${i + 1} falló.`);
+                    continue; 
                 }
             }
 
             if (!finalUrl) {
-                return sock.sendMessage(remitente, { text: `❌ Todos los nodos externos están saturados por YouTube. Intenta de nuevo más tarde.`, edit: statusMsg.key });
+                return sock.sendMessage(remitente, { 
+                    text: `❌ *CAÍDA TOTAL:* Los 7 nodos de descarga han fallado simultáneamente. YouTube ha actualizado sus bloqueos hoy. Intenta de nuevo en un rato.`, 
+                    edit: statusMsg.key 
+                });
             }
 
-            await sock.sendMessage(remitente, { text: "🚀 Transmitiendo al chat...", edit: statusMsg.key });
+            await sock.sendMessage(remitente, { text: "🚀 ¡Enlace encontrado! Enviando...", edit: statusMsg.key });
 
-            // 4. Enviar resultado
-            if (isVideo) {
-                await sock.sendMessage(remitente, { video: { url: finalUrl }, mimetype: 'video/mp4', caption: `✅ ${video.title}` }, { quoted: msg });
-            } else {
-                await sock.sendMessage(remitente, { audio: { url: finalUrl }, mimetype: 'audio/mpeg' }, { quoted: msg });
-            }
+            // Enviar el archivo
+            const messageConfig = isVideo 
+                ? { video: { url: finalUrl }, mimetype: 'video/mp4', caption: `✅ ${video.title}` }
+                : { audio: { url: finalUrl }, mimetype: 'audio/mpeg' };
 
+            await sock.sendMessage(remitente, messageConfig, { quoted: msg });
             await sock.sendMessage(remitente, { delete: statusMsg.key });
 
         } catch (error) {
-            console.error("ERROR PLUGIN PLAY:", error.message);
-            await sock.sendMessage(remitente, { text: `❌ Error interno: ${error.message}` });
+            console.error(error);
+            await sock.sendMessage(remitente, { text: `❌ Error inesperado: ${error.message}`, edit: statusMsg.key });
         }
     }
 };
