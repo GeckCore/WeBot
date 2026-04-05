@@ -16,41 +16,44 @@ module.exports = {
         // 2. Extraer el texto del anuncio
         let anuncio = textoLimpio.replace(/^(tagall|tag|hidetag|notificar)\s*/i, '').trim();
         
-        // 3. Lógica Multimedia
-        const mediaActual = getMediaInfo(msg.message);
-        const mediaCitada = getMediaInfo(quoted);
-        const info = mediaActual || mediaCitada;
+        // 3. Lógica de Envío
+        try {
+            const mediaActual = getMediaInfo(msg.message);
+            const mediaCitada = getMediaInfo(quoted);
+            const info = mediaActual || mediaCitada;
 
-        if (info) {
-            try {
+            if (info) {
+                // Caso con Media
                 const stream = await downloadContentFromMessage(info.msg, info.type);
                 let buffer = Buffer.from([]);
                 for await(const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
 
                 const caption = anuncio || info.msg.caption || "";
-                const content = {};
-                content[info.type] = buffer;
+                const content = {
+                    [info.type]: buffer,
+                    mentions: participantes
+                };
                 
                 if (info.type !== 'audio') content.caption = caption;
-                
-                content.mentions = participantes;
-
                 if (info.type === 'video') content.mimetype = 'video/mp4';
                 if (info.type === 'audio') content.mimetype = 'audio/mp4';
 
-                return await sock.sendMessage(remitente, content);
-            } catch (err) {
-                return sock.sendMessage(remitente, { text: `❌ Error al procesar media: ${err.message}` });
+                await sock.sendMessage(remitente, content);
+            } else {
+                // Caso solo Texto
+                const textoFinal = anuncio || "📢 ¡Atención a todos!";
+                await sock.sendMessage(remitente, { 
+                    text: textoFinal, 
+                    mentions: participantes 
+                });
             }
-        }
 
-        // 4. Lógica de Texto (Hidetag corregido)
-        const textoFinal = anuncio || "📢 ¡Atención a todos!";
-        
-        // Se envía como mensaje nuevo, vinculando el array de participantes al parámetro mentions.
-        await sock.sendMessage(remitente, { 
-            text: textoFinal, 
-            mentions: participantes 
-        });
+            // 4. Eliminación del mensaje original (Trigger)
+            // Requiere que el bot sea ADMIN para borrar mensajes de otros
+            await sock.sendMessage(remitente, { delete: msg.key });
+
+        } catch (err) {
+            return sock.sendMessage(remitente, { text: `❌ Error en el comando: ${err.message}` });
+        }
     }
 };
