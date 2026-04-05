@@ -8,22 +8,19 @@ module.exports = {
         const rawUrl = textoLimpio.match(/(https?:\/\/[^\s]+)/i)[1];
         let statusMsg = await sock.sendMessage(remitente, { text: "⏳ Interceptando enlace..." }, { quoted: msg });
 
-        // Configuración base para evitar bloqueos por falta de cabeceras en NodeJS
         const axiosConfig = {
             headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+                'Accept': 'application/json'
             },
-            timeout: 10000 // Cortar si el nodo tarda más de 10 segundos
+            timeout: 15000 
         };
 
         try {
-            // ==========================================
-            // RUTA 1: TIKTOK (Motor TikWM - Intacto)
-            // ==========================================
+            // RUTA 1: TIKTOK
             if (rawUrl.includes('tiktok.com')) {
                 const res = await axios.get(`https://tikwm.com/api/?url=${encodeURIComponent(rawUrl)}&hd=1`, axiosConfig);
                 const data = res.data?.data;
-
                 if (!data) throw new Error("El video es privado o fue eliminado.");
 
                 await sock.sendMessage(remitente, { text: "🚀 Transmitiendo TikTok...", edit: statusMsg.key });
@@ -33,25 +30,22 @@ module.exports = {
                         await sock.sendMessage(remitente, { image: { url: img } });
                     }
                 } else if (data.play) {
-                    const videoUrl = data.hdplay || data.play; 
-                    await sock.sendMessage(remitente, { video: { url: videoUrl }, mimetype: 'video/mp4' }, { quoted: msg });
+                    await sock.sendMessage(remitente, { video: { url: data.hdplay || data.play }, mimetype: 'video/mp4' }, { quoted: msg });
                 }
-                
                 return await sock.sendMessage(remitente, { delete: statusMsg.key });
             } 
             
-            // ==========================================
-            // RUTA 2: INSTAGRAM (Cascada de Nodos Premium)
-            // ==========================================
+            // RUTA 2: INSTAGRAM
             else if (rawUrl.includes('instagram.com') || rawUrl.includes('ig.me')) {
                 const cleanUrl = rawUrl.split('?')[0]; 
                 const encodedUrl = encodeURIComponent(cleanUrl);
                 let mediaList = [];
 
-                // Cascada actualizada con nodos operativos al día de hoy
+                // Cascada de nodos actualizada (Abril 2026)
                 const igApis = [
                     async () => (await axios.get(`https://api.vreden.web.id/api/igdl?url=${encodedUrl}`, axiosConfig)).data?.result,
-                    async () => (await axios.get(`https://bk9.fun/download/instagram?url=${encodedUrl}`, axiosConfig)).data?.BK9,
+                    async () => (await axios.get(`https://widipe.com/download/igdl?url=${encodedUrl}`, axiosConfig)).data?.result,
+                    async () => (await axios.get(`https://api.agungny.my.id/api/igdl?url=${encodedUrl}`, axiosConfig)).data?.result,
                     async () => (await axios.get(`https://api.siputzx.my.id/api/d/igdl?url=${encodedUrl}`, axiosConfig)).data?.data,
                     async () => (await axios.get(`https://api.ryzendesu.vip/api/downloader/igdl?url=${encodedUrl}`, axiosConfig)).data?.data
                 ];
@@ -59,32 +53,35 @@ module.exports = {
                 for (let i = 0; i < igApis.length; i++) {
                     try {
                         let result = await igApis[i]();
-                        
-                        // Normalizar la respuesta (puede ser un array o un solo objeto)
-                        if (result && Array.isArray(result) && result.length > 0) {
-                            mediaList = result;
-                            break; 
-                        } else if (result && result.url) {
-                            mediaList = [result];
-                            break;
+                        if (!result) continue;
+
+                        // Normalización robusta
+                        if (Array.isArray(result)) {
+                            mediaList = result.map(i => typeof i === 'string' ? i : (i.url || i.download_link || i.videoUrl));
+                        } else if (typeof result === 'object') {
+                            const singleUrl = result.url || result.download_link || result.videoUrl || result[0]?.url;
+                            if (singleUrl) mediaList = [singleUrl];
                         }
+
+                        if (mediaList.length > 0 && mediaList[0]) break;
                     } catch (e) {
-                        console.log(`[INFO] Nodo IG ${i + 1} falló o está saturado.`);
+                        console.log(`[INFO] Nodo IG ${i + 1} falló.`);
                         continue; 
                     }
                 }
 
-                if (mediaList.length === 0) {
-                    throw new Error("Todos los servidores de extracción están bloqueados temporalmente por Instagram.");
+                if (mediaList.length === 0 || !mediaList[0]) {
+                    throw new Error("Insta-Shield activo. Todos los nodos saturados o IP bloqueada.");
                 }
 
                 await sock.sendMessage(remitente, { text: "🚀 Transmitiendo Instagram...", edit: statusMsg.key });
 
-                for (let item of mediaList) {
-                    const dlUrl = item.url || item;
-                    if (!dlUrl) continue;
-
-                    if (dlUrl.includes('.mp4') || dlUrl.includes('video') || item.type === 'video') {
+                for (let dlUrl of mediaList) {
+                    if (!dlUrl || typeof dlUrl !== 'string') continue;
+                    
+                    const isVideo = dlUrl.includes('.mp4') || dlUrl.includes('video') || dlUrl.includes('fbcdn.net'); // IG usa fbcdn para videos
+                    
+                    if (isVideo) {
                         await sock.sendMessage(remitente, { video: { url: dlUrl }, mimetype: 'video/mp4' });
                     } else {
                         await sock.sendMessage(remitente, { image: { url: dlUrl } });
