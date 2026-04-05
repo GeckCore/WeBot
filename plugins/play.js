@@ -18,7 +18,6 @@ module.exports = {
         let statusMsg = await sock.sendMessage(remitente, { text: `🔍 Buscando "${query}" en YouTube...` });
 
         try {
-            // 1. Busqueda en YouTube
             const searchRes = await yts({ query, hl: 'es', gl: 'ES' });
             const video = searchRes.videos[0];
 
@@ -26,12 +25,9 @@ module.exports = {
                 return sock.sendMessage(remitente, { text: "❌ No se encontraron resultados.", edit: statusMsg.key });
             }
 
-            // 2. Enviar Info y Miniatura
             const infoTexto = `📌 *${video.title}*\n` +
                               `⏱️ *Duración:* ${video.timestamp}\n` +
-                              `👀 *Vistas:* ${video.views.toLocaleString()}\n` +
-                              `👤 *Canal:* ${video.author.name}\n` +
-                              `🔗 *Link:* ${video.url}\n\n` +
+                              `👤 *Canal:* ${video.author.name}\n\n` +
                               `⏳ *Descargando ${isVideo ? 'Video' : 'Audio'}...*`;
 
             await sock.sendMessage(remitente, { 
@@ -40,35 +36,33 @@ module.exports = {
                 edit: statusMsg.key
             });
 
-            // 3. Configuración de descarga con ./yt-dlp
             const idStr = Date.now().toString();
             const ext = isVideo ? 'mp4' : 'mp3';
-            const outputPath = path.join(__dirname, `../temp/play_${idStr}.${ext}`);
+            // Guardamos en la raíz o en temp si existe
+            const outputPath = path.join(__dirname, `../play_${idStr}.${ext}`);
             
-            // Bypass para evitar bloqueos de YouTube (usando el cliente de Android)
             const format = isVideo 
                 ? '-f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best" --merge-output-format mp4'
                 : '-f "bestaudio/best" -x --audio-format mp3';
             
-            const cmd = `./yt-dlp --no-playlist --no-warnings ${format} -o "${outputPath}" "${video.url}" --extractor-args "youtube:player_client=android"`;
+            // --- CORRECCIÓN CRÍTICA PARA PTERODACTYL ---
+            // Le indicamos que ffmpeg está en la misma carpeta raíz (./ffmpeg)
+            const cmd = `./yt-dlp --no-playlist --no-warnings ${format} --ffmpeg-location ./ffmpeg -o "${outputPath}" "${video.url}" --extractor-args "youtube:player_client=android"`;
 
-            // 4. Ejecutar descarga
             await execPromise(cmd);
 
             if (!fs.existsSync(outputPath)) {
-                throw new Error("El archivo no se generó.");
+                throw new Error("El archivo no se generó. Revisa si subiste el archivo 'ffmpeg' a la raíz.");
             }
 
-            // 5. Verificar tamaño (50MB límite)
             const stats = fs.statSync(outputPath);
             const fileSizeMB = stats.size / (1024 * 1024);
 
             if (fileSizeMB > 50) {
-                fs.unlinkSync(outputPath);
-                return sock.sendMessage(remitente, { text: `⚠️ El archivo es demasiado grande (${fileSizeMB.toFixed(1)}MB). El límite son 50MB.` });
+                if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+                return sock.sendMessage(remitente, { text: `⚠️ El archivo es demasiado grande (${fileSizeMB.toFixed(1)}MB).` });
             }
 
-            // 6. Enviar a WhatsApp
             if (isVideo) {
                 await sock.sendMessage(remitente, { 
                     video: { url: outputPath }, 
@@ -83,8 +77,8 @@ module.exports = {
                 }, { quoted: msg });
             }
 
-            // Limpieza
-            fs.unlinkSync(outputPath);
+            if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+            await sock.sendMessage(remitente, { delete: statusMsg.key });
 
         } catch (error) {
             console.error(error);
