@@ -9,58 +9,60 @@ module.exports = {
         let statusMsg = await sock.sendMessage(remitente, { text: `🔍 Buscando letra de: *${query}*...` });
 
         try {
-            // 1. Buscamos la canción en Genius a través de la API de Delirius
-            const searchRes = await axios.get(`https://deliriussapi-oficial.vercel.app/search/genius?q=${encodeURIComponent(query)}`);
-            const songData = searchRes.data[0];
+            let title, artist, lyrics, image;
 
-            if (!songData) {
-                return sock.sendMessage(remitente, { text: "❌ No encontré resultados para esa canción.", edit: statusMsg.key });
-            }
-
-            // 2. Extraemos la letra usando la URL obtenida
-            const lyricsRes = await axios.get(`https://deliriussapi-oficial.vercel.app/search/lyrics?url=${encodeURIComponent(songData.url)}&parse=false`);
-            const lyrics = lyricsRes.data.lyrics || "Letra no disponible.";
-
-            // 3. Intentamos obtener un audio preview (usando una API alternativa para no depender de librerías pesadas)
-            let previewUrl = "";
+            // 1. Intento principal: API de Popcat
             try {
-                const someRandomRes = await axios.get(`https://some-random-api.com/lyrics?title=${encodeURIComponent(songData.title)}`);
-                previewUrl = someRandomRes.data?.thumbnail?.genius || songData.image;
+                const res = await axios.get(`https://api.popcat.xyz/lyrics?song=${encodeURIComponent(query)}`);
+                if (!res.data.lyrics) throw new Error("Sin letra en Popcat");
+                
+                title = res.data.title;
+                artist = res.data.artist;
+                lyrics = res.data.lyrics;
+                image = res.data.image;
             } catch (e) {
-                previewUrl = songData.image;
+                // 2. Fallback: Some-Random-API
+                const resFallback = await axios.get(`https://some-random-api.com/lyrics?title=${encodeURIComponent(query)}`);
+                if (!resFallback.data.lyrics) throw new Error("Sin letra en Fallback");
+
+                title = resFallback.data.title;
+                artist = resFallback.data.author;
+                lyrics = resFallback.data.lyrics;
+                image = resFallback.data.thumbnail?.genius;
             }
 
-            const textoFinal = `🎵 *TITULO:* ${songData.title}\n` +
-                               `👤 *ARTISTA:* ${songData.artist.name}\n\n` +
+            const textoFinal = `🎵 *TITULO:* ${title}\n` +
+                               `👤 *ARTISTA:* ${artist}\n\n` +
                                `📜 *LETRA:*\n\n${lyrics}`;
 
-            // 4. Enviamos imagen con la letra
+            // 3. Enviar Imagen con la Letra
+            const imagenSegura = image || "https://i.imgur.com/vHmtx2a.jpeg"; // Fondo genérico si no hay portada
             await sock.sendMessage(remitente, { 
-                image: { url: songData.image }, 
+                image: { url: imagenSegura }, 
                 caption: textoFinal 
             }, { quoted: msg });
 
-            // 5. Intentamos enviar el audio preview de Deezer si está disponible (basado en tu lógica)
-            // Nota: La API de some-random-api a veces da el link de preview directamente.
+            // 4. Intentar enviar el audio preview de Deezer
             try {
-                const deezerRes = await axios.get(`https://api.deezer.com/search?q=${encodeURIComponent(songData.title + ' ' + songData.artist.name)}`);
+                const deezerRes = await axios.get(`https://api.deezer.com/search?q=${encodeURIComponent(title + ' ' + artist)}`);
                 const track = deezerRes.data.data[0];
+                
                 if (track && track.preview) {
                     await sock.sendMessage(remitente, { 
                         audio: { url: track.preview }, 
                         mimetype: 'audio/mp4',
-                        fileName: `${songData.title}.mp3`
+                        fileName: `${title}.mp3`
                     }, { quoted: msg });
                 }
             } catch (errAudio) {
-                console.log("No se pudo enviar el audio preview.");
+                console.log("[INFO] Audio preview no encontrado en Deezer.");
             }
 
             await sock.sendMessage(remitente, { delete: statusMsg.key });
 
         } catch (error) {
-            console.error(error);
-            await sock.sendMessage(remitente, { text: `❌ Error: No se pudo obtener la letra.`, edit: statusMsg.key });
+            console.error("Error en Lyrics:", error.message);
+            await sock.sendMessage(remitente, { text: `❌ Error: No se encontró la letra para "${query}".`, edit: statusMsg.key });
         }
     }
 };
