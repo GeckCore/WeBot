@@ -36,23 +36,21 @@ module.exports = {
             const ext = isVideo ? 'mp4' : 'mp3';
             const outputPath = path.join(__dirname, `../play_${idStr}.${ext}`);
             
-            // Selector de formato restaurado a la configuración óptima para Android/Web
-            const format = isVideo 
-                ? '-f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/b[ext=mp4]/b"' 
-                : '-f "bestaudio/best"';
+            // Selector "Fuerza Bruta": ba (best audio) o b (best video/audio combinado)
+            const format = isVideo ? '-f "b"' : '-f "ba/b"';
             
             const cookiePath = './cookies.txt';
             const cookieArg = fs.existsSync(cookiePath) ? `--cookies ${cookiePath}` : '';
             
-            // Se inyecta --rm-cache-dir para limpiar bloqueos previos y se fuerza el cliente Android
-            const cmd = `./yt-dlp --rm-cache-dir -4 --geo-bypass --no-playlist --no-warnings --no-check-certificate ${format} -x --audio-format mp3 --ffmpeg-location ./ffmpeg ${cookieArg} --extractor-args "youtube:player_client=android" -o "${outputPath}" "${video.url}"`;
+            // Eliminado el client_player=android. Usamos cliente web puro + cookies + fallback de formato
+            const cmd = `./yt-dlp --no-playlist --no-warnings --no-check-certificate ${format} -x --audio-format mp3 --ffmpeg-location ./ffmpeg ${cookieArg} -o "${outputPath}" "${video.url}"`;
 
             const finalCmd = isVideo ? cmd.replace('-x --audio-format mp3', '') : cmd;
 
             await execPromise(finalCmd);
 
             if (!fs.existsSync(outputPath)) {
-                throw new Error("YouTube bloqueó la IP mediante la API de Android.");
+                throw new Error("Archivo no generado.");
             }
 
             const stats = fs.statSync(outputPath);
@@ -72,7 +70,13 @@ module.exports = {
 
         } catch (error) {
             console.error("DEBUG LOG:", error);
-            await sock.sendMessage(remitente, { text: `❌ Fallo crítico de extracción. La mitigación de Android/Cookies ha sido rechazada por el servidor.` });
+            await sock.sendMessage(remitente, { text: `❌ Error: YouTube ha bloqueado el formato para esta IP. La extracción falló.` });
+            
+            const idMatch = error.cmd?.match(/play_(\d+)/);
+            if (idMatch) {
+                const possibleFile = path.join(__dirname, `../play_${idMatch[1]}.mp3`);
+                if (fs.existsSync(possibleFile)) fs.unlinkSync(possibleFile);
+            }
         }
     }
 };
