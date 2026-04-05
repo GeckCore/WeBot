@@ -6,56 +6,69 @@ module.exports = {
     match: (text) => /^(letra|lyrics|lyric|lirik)\s+(.+)$/i.test(text),
     execute: async ({ sock, remitente, textoLimpio, msg }) => {
         const query = textoLimpio.match(/^(letra|lyrics|lyric|lirik)\s+(.+)$/i)[2].trim();
-        let statusMsg = await sock.sendMessage(remitente, { text: `🔍 Buscando letra de: *${query}*...` });
+        let statusMsg = await sock.sendMessage(remitente, { text: `🔎 Identificando canción: *${query}*...` });
 
         try {
-            // 1. Extraer letra desde LRCLIB (Base de datos Open Source, sin bloqueos de IP)
-            const lrclibRes = await axios.get(`https://lrclib.net/api/search?q=${encodeURIComponent(query)}`);
-            
-            // Filtramos el primer resultado que realmente contenga letra
-            const songData = lrclibRes.data.find(t => t.plainLyrics);
+            // 1. OBTENER METADATOS OFICIALES (iTunes) - Esto asegura que no se equivoque de canción
+            const itunesRes = await axios.get(`https://itunes.apple.com/search?term=${encodeURIComponent(query)}&entity=song&limit=1`);
+            const track = itunesRes.data.results[0];
 
-            if (!songData) {
-                return sock.sendMessage(remitente, { text: "❌ No encontré la letra en la base de datos.", edit: statusMsg.key });
+            if (!track) {
+                return sock.sendMessage(remitente, { text: "❌ No pude identificar esa canción. Intenta escribir el nombre y el artista.", edit: statusMsg.key });
             }
 
-            const title = songData.trackName;
-            const artist = songData.artistName;
-            const lyrics = songData.plainLyrics;
+            const officialTitle = track.trackName;
+            const officialArtist = track.artistName;
+            const image = track.artworkUrl100.replace('100x100bb', '600x600bb');
+            const previewUrl = track.previewUrl;
 
-            // 2. Extraer Portada y Audio Preview desde la API oficial de iTunes (A prueba de balas)
-            let image = "https://i.imgur.com/vHmtx2a.jpeg"; // Fondo por defecto
-            let previewUrl = null;
+            await sock.sendMessage(remitente, { text: `✅ Encontrada: *${officialTitle}* de *${officialArtist}*\n⏳ Buscando letra...`, edit: statusMsg.key });
 
+            let lyrics = null;
+
+            // 2. BUSQUEDA EN NODO 1: LRCLIB (Rápida y segura para VPS)
             try {
-                const itunesRes = await axios.get(`https://itunes.apple.com/search?term=${encodeURIComponent(artist + ' ' + title)}&entity=song&limit=1`);
-                const itunesTrack = itunesRes.data.results[0];
-                
-                if (itunesTrack) {
-                    // iTunes da portadas de 100x100, modificamos la URL para forzar 600x600 (alta resolución)
-                    image = itunesTrack.artworkUrl100.replace('100x100bb', '600x600bb');
-                    previewUrl = itunesTrack.previewUrl;
-                }
+                const lrclibRes = await axios.get(`https://lrclib.net/api/get?artist_name=${encodeURIComponent(officialArtist)}&track_name=${encodeURIComponent(officialTitle)}`);
+                lyrics = lrclibRes.data.plainLyrics;
             } catch (e) {
-                console.log("[INFO] iTunes API no respondió, se usará la imagen por defecto.");
+                console.log("[INFO] Nodo 1 falló, probando Nodo de Emergencia...");
             }
 
-            const textoFinal = `🎵 *TÍTULO:* ${title}\n` +
-                               `👤 *ARTISTA:* ${artist}\n\n` +
+            // 3. BUSQUEDA EN NODO 2: SIPUTZX (Genius/Google Scraper) - Para canciones difíciles
+            if (!lyrics) {
+                try {
+                    const siputzRes = await axios.get(`https://api.siputzx.my.id/api/s/genius?q=${encodeURIComponent(officialArtist + " " + officialTitle)}`);
+                    // El nodo de búsqueda nos da una URL de Genius, ahora extraemos la letra
+                    const geniusUrl = siputzRes.data.data[0]?.url;
+                    if (geniusUrl) {
+                        const lyricsRes = await axios.get(`https://api.siputzx.my.id/api/d/lyrics?url=${encodeURIComponent(geniusUrl)}`);
+                        lyrics = lyricsRes.data.data?.lyrics;
+                    }
+                } catch (e) {
+                    console.log("[INFO] Nodo 2 falló.");
+                }
+            }
+
+            if (!lyrics || lyrics.length < 10) {
+                return sock.sendMessage(remitente, { text: `❌ No se encontró la letra de *${officialTitle}* en ninguna base de datos pública.`, edit: statusMsg.key });
+            }
+
+            const textoFinal = `🎵 *TÍTULO:* ${officialTitle}\n` +
+                               `👤 *ARTISTA:* ${officialArtist}\n\n` +
                                `📜 *LETRA:*\n\n${lyrics}`;
 
-            // 3. Enviar Imagen + Letra
+            // Enviar Portada + Letra
             await sock.sendMessage(remitente, { 
                 image: { url: image }, 
                 caption: textoFinal 
             }, { quoted: msg });
 
-            // 4. Enviar Audio de Muestra (Si iTunes lo proporcionó)
+            // Enviar Audio Preview (iTunes siempre funciona)
             if (previewUrl) {
                 await sock.sendMessage(remitente, { 
                     audio: { url: previewUrl }, 
                     mimetype: 'audio/mp4',
-                    fileName: `${title}.mp3`
+                    fileName: `${officialTitle}.mp3`
                 }, { quoted: msg });
             }
 
@@ -63,7 +76,7 @@ module.exports = {
 
         } catch (error) {
             console.error("Error en Lyrics:", error.message);
-            await sock.sendMessage(remitente, { text: `❌ Error de red interno: ${error.message}`, edit: statusMsg.key });
+            await sock.sendMessage(remitente, { text: `❌ Error técnico: ${error.message}`, edit: statusMsg.key });
         }
     }
 };
