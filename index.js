@@ -21,70 +21,30 @@ binarios.forEach(bin => {
 });
 
 // Cargar plugins dinámicamente
-const pluginsDir = path.join(__dirname, 'plugins');
-if (!fs.existsSync(pluginsDir)) fs.mkdirSync(pluginsDir);
-const plugins = fs.readdirSync(pluginsDir)
-    .filter(file => file.endsWith('.js'))
-    .map(file => require(path.join(pluginsDir, file)));
+const cargarPlugins = async () => {
+    const pluginsDir = path.join(__dirname, 'plugins');
+    const files = fs.readdirSync(pluginsDir).filter(file => file.endsWith('.js'));
+    
+    const pluginsCargados = [];
 
-async function iniciarBot() {
-    const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
-    const { version, isLatest } = await fetchLatestBaileysVersion();
-    console.log(`[INFO] Versión WA Web: ${version.join('.')} (Última: ${isLatest})`);
-
-    const sock = makeWASocket({
-        version, 
-        auth: state, 
-        printQRInTerminal: false,
-        browser: ['Ubuntu', 'Chrome', '122.0.0.0'], 
-        syncFullHistory: false
-    });
-
-    sock.ev.on('creds.update', saveCreds);
-    sock.ev.on('connection.update', (update) => {
-        const { connection, qr } = update;
-        if (qr) qrcode.generate(qr, { small: true });
-        if (connection === 'close') {
-            console.log('[INFO] Conexión cerrada. Reconectando...');
-            iniciarBot();
-        } else if (connection === 'open') {
-            console.log(`[INFO] ¡Conectado! (${plugins.length} plugins cargados)`);
+    for (const file of files) {
+        try {
+            const fullPath = path.join(pluginsDir, file);
+            // Usamos import() dinámico con el prefijo file:// para que funcione en Windows/Linux
+            // Esto permite cargar tanto tus plugins viejos (CJS) como el serbot nuevo (ESM)
+            const module = await import('file://' + fullPath);
+            
+            // Si el plugin usa 'module.exports', estará en module.default o en el objeto raíz
+            // Si el plugin usa 'export default', estará en module.default
+            const plugin = module.default || module;
+            
+            pluginsCargados.push(plugin);
+        } catch (err) {
+            console.error(`❌ Error cargando plugin ${file}:`, err.message);
         }
-    });
-
-    const getMediaInfo = (msgObj) => {
-        if (!msgObj) return null;
-        if (msgObj.videoMessage) return { type: 'video', msg: msgObj.videoMessage, ext: 'mp4' };
-        if (msgObj.imageMessage) return { type: 'image', msg: msgObj.imageMessage, ext: 'jpg' };
-        if (msgObj.audioMessage) return { type: 'audio', msg: msgObj.audioMessage, ext: 'ogg' };
-        if (msgObj.documentMessage) return { type: 'document', msg: msgObj.documentMessage, ext: 'bin' };
-        if (msgObj.documentWithCaptionMessage?.message?.documentMessage) {
-            return { type: 'document', msg: msgObj.documentWithCaptionMessage.message.documentMessage, ext: 'bin' };
-        }
-        return null;
-    };
-
-    sock.ev.on('messages.upsert', async (m) => {
-        const msg = m.messages[0];
-        if (!msg.message) return;
-
-        const remitente = msg.key.remoteJid;
-        if (remitente === 'status@broadcast') return;
-
-        const fromMe = msg.key.fromMe;
-        const texto = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
-        const textoLimpio = texto.trim();
-
-        const msgType = Object.keys(msg.message).find(k => ['videoMessage', 'imageMessage', 'documentMessage', 'audioMessage'].includes(k));
-        const quoted = msg.message.extendedTextMessage?.contextInfo?.quotedMessage;
-
-        if (!textoLimpio && !msgType) return;
-
-        const ctx = {
-            sock, msg, remitente, textoLimpio, fromMe, 
-            getMediaInfo, downloadContentFromMessage, quoted, msgType
-        };
-
+    }
+    return pluginsCargados;
+};
         // Bucle de evaluación de plugins
         for (const plugin of plugins) {
             if (plugin.match(textoLimpio, ctx)) {
