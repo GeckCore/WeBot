@@ -17,8 +17,7 @@ module.exports = {
         const outName = `dl_${Date.now()}`;
         const ext = isAudio ? 'wav' : 'mp4';
         const format = isAudio ? '-f "bestaudio/best" -x --audio-format wav' : '-f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best" --merge-output-format mp4';
-        const cmdBase = `yt-dlp --no-playlist --no-warnings -o "${outName}.%(ext)s" ${format}`;
-
+        const cmdBase = `./yt-dlp --no-playlist --no-warnings -o "${outName}.%(ext)s" ${format}`;
         const attempts = usaDRM ? [`${cmdBase} "ytsearch1:${urlLimpia}"`] : [
             `${cmdBase} --extractor-args "youtube:player_client=android" --add-header "User-Agent:Mozilla/5.0" "${urlLimpia}"`,
             `${cmdBase} --extractor-args "youtube:player_client=ios" "${urlLimpia}"`,
