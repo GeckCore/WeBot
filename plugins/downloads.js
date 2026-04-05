@@ -8,12 +8,20 @@ module.exports = {
         const rawUrl = textoLimpio.match(/(https?:\/\/[^\s]+)/i)[1];
         let statusMsg = await sock.sendMessage(remitente, { text: "⏳ Interceptando enlace..." }, { quoted: msg });
 
+        // Configuración base para evitar bloqueos por falta de cabeceras en NodeJS
+        const axiosConfig = {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            },
+            timeout: 10000 // Cortar si el nodo tarda más de 10 segundos
+        };
+
         try {
             // ==========================================
             // RUTA 1: TIKTOK (Motor TikWM - Intacto)
             // ==========================================
             if (rawUrl.includes('tiktok.com')) {
-                const res = await axios.get(`https://tikwm.com/api/?url=${encodeURIComponent(rawUrl)}&hd=1`);
+                const res = await axios.get(`https://tikwm.com/api/?url=${encodeURIComponent(rawUrl)}&hd=1`, axiosConfig);
                 const data = res.data?.data;
 
                 if (!data) throw new Error("El video es privado o fue eliminado.");
@@ -33,55 +41,49 @@ module.exports = {
             } 
             
             // ==========================================
-            // RUTA 2: INSTAGRAM (Limpieza de URL + Nodo Delirius)
+            // RUTA 2: INSTAGRAM (Cascada de Nodos Premium)
             // ==========================================
             else if (rawUrl.includes('instagram.com') || rawUrl.includes('ig.me')) {
-                // CORRECCIÓN VITAL: Cortar parámetros de rastreo (?igsh=) que rompen las descargas
                 const cleanUrl = rawUrl.split('?')[0]; 
                 const encodedUrl = encodeURIComponent(cleanUrl);
                 let mediaList = [];
 
-                // Cascada de APIs, poniendo Delirius como nodo principal (el más estable para IG)
+                // Cascada actualizada con nodos operativos al día de hoy
                 const igApis = [
-                    async () => {
-                        const res = await axios.get(`https://deliriussapi-oficial.vercel.app/download/instagram?url=${encodedUrl}`);
-                        return res.data?.data; // Devuelve array de medios
-                    },
-                    async () => {
-                        const res = await axios.get(`https://api.siputzx.my.id/api/d/igdl?url=${encodedUrl}`);
-                        return res.data?.data; 
-                    },
-                    async () => {
-                        const res = await axios.get(`https://api.ryzendesu.vip/api/downloader/igdl?url=${encodedUrl}`);
-                        return res.data?.data;
-                    }
+                    async () => (await axios.get(`https://api.vreden.web.id/api/igdl?url=${encodedUrl}`, axiosConfig)).data?.result,
+                    async () => (await axios.get(`https://bk9.fun/download/instagram?url=${encodedUrl}`, axiosConfig)).data?.BK9,
+                    async () => (await axios.get(`https://api.siputzx.my.id/api/d/igdl?url=${encodedUrl}`, axiosConfig)).data?.data,
+                    async () => (await axios.get(`https://api.ryzendesu.vip/api/downloader/igdl?url=${encodedUrl}`, axiosConfig)).data?.data
                 ];
 
-                for (const fetchApi of igApis) {
+                for (let i = 0; i < igApis.length; i++) {
                     try {
-                        const result = await fetchApi();
-                        // Instagram devuelve arrays porque un post puede tener varias fotos o videos
+                        let result = await igApis[i]();
+                        
+                        // Normalizar la respuesta (puede ser un array o un solo objeto)
                         if (result && Array.isArray(result) && result.length > 0) {
                             mediaList = result;
                             break; 
+                        } else if (result && result.url) {
+                            mediaList = [result];
+                            break;
                         }
                     } catch (e) {
-                        continue; // Si un nodo cae, pasa al siguiente en milisegundos
+                        console.log(`[INFO] Nodo IG ${i + 1} falló o está saturado.`);
+                        continue; 
                     }
                 }
 
                 if (mediaList.length === 0) {
-                    throw new Error("Servidores de extracción saturados o reel no disponible.");
+                    throw new Error("Todos los servidores de extracción están bloqueados temporalmente por Instagram.");
                 }
 
                 await sock.sendMessage(remitente, { text: "🚀 Transmitiendo Instagram...", edit: statusMsg.key });
 
                 for (let item of mediaList) {
-                    // Adaptamos la lectura dependiendo del nodo que haya respondido
                     const dlUrl = item.url || item;
                     if (!dlUrl) continue;
 
-                    // Si es video lo manda como mp4, si es imagen la manda como foto
                     if (dlUrl.includes('.mp4') || dlUrl.includes('video') || item.type === 'video') {
                         await sock.sendMessage(remitente, { video: { url: dlUrl }, mimetype: 'video/mp4' });
                     } else {
