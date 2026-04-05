@@ -3,7 +3,6 @@ const { default: makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion,
 const pino = require('pino');
 const fs = require('fs');
 const path = require('path');
-const axios = require('axios');
 
 global.subbots = global.subbots || new Map();
 
@@ -11,7 +10,7 @@ module.exports = {
     name: 'serbot',
     match: (text) => /^(serbot|bots)/i.test(text),
     execute: async (ctx) => {
-        const { sock, remitente, textoLimpio, msg, getMediaInfo } = ctx;
+        const { sock, remitente, textoLimpio, getMediaInfo } = ctx;
         const match = textoLimpio.match(/^(serbot|bots)(?:\s+(.+))?$/i);
         const command = match[1].toLowerCase();
         const args = match[2] ? match[2].trim().split(' ') : [];
@@ -19,7 +18,7 @@ module.exports = {
         // --- COMANDO: BOTS ---
         if (command === 'bots') {
             if (global.subbots.size === 0) {
-                return sock.sendMessage(remitente, { text: "❌ No hay sub-bots activos." });
+                return sock.sendMessage(remitente, { text: "❌ No hay sub-bots activos." }, { linkPreview: false });
             }
             let lista = "🤖 *LISTA DE SUB-BOTS ACTIVOS*\n\n";
             let i = 1;
@@ -28,7 +27,7 @@ module.exports = {
                 i++;
             }
             lista += `\n*Total:* ${global.subbots.size} bot(s).`;
-            return sock.sendMessage(remitente, { text: lista });
+            return sock.sendMessage(remitente, { text: lista }, { linkPreview: false });
         }
 
         // --- COMANDO: SERBOT ---
@@ -55,25 +54,26 @@ module.exports = {
 
             const subSock = makeWASocket({
                 version,
-                logger: pino({ level: 'silent' }), // Vital para evitar colisiones de logs en VPS
+                logger: pino({ level: 'silent' }), // Silenciado para evitar cruce de datos
                 auth: state,
                 printQRInTerminal: false,
-                browser: ['Ubuntu', 'Chrome', '122.0.0.0'], // Evita el bloqueo de dispositivos no reconocidos
+                browser: ['Ubuntu', 'Chrome', '122.0.0.0'], 
                 syncFullHistory: false,
-                markOnlineOnConnect: true
+                markOnlineOnConnect: true,
+                generateHighQualityLinkPreview: false // Desactiva el uso de Sharp para enlaces
             });
 
             subSock.ev.on('creds.update', saveCreds);
 
-            // Generar código de emparejamiento
+            // Generar código de vinculación
             if (method === 'code' && !subSock.authState.creds.registered) {
                 const numeroTarget = args[1] ? args[1].replace(/[^0-9]/g, '') : subbotId;
                 setTimeout(async () => {
                     try {
                         const code = await subSock.requestPairingCode(numeroTarget);
-                        await sock.sendMessage(remitente, { text: `🔢 *CÓDIGO:*\n\n*${code}*\n\nVe a WhatsApp > Dispositivos vinculados.`, edit: statusMsg.key });
+                        await sock.sendMessage(remitente, { text: `🔢 *CÓDIGO:*\n\n*${code}*\n\nVe a WhatsApp > Dispositivos vinculados.`, edit: statusMsg.key }, { linkPreview: false });
                     } catch (err) {
-                        await sock.sendMessage(remitente, { text: `❌ Error al pedir código: ${err.message}`, edit: statusMsg.key });
+                        await sock.sendMessage(remitente, { text: `❌ Error al generar código: ${err.message}`, edit: statusMsg.key });
                     }
                 }, 3000); 
             }
@@ -81,80 +81,74 @@ module.exports = {
             subSock.ev.on('connection.update', async (update) => {
                 const { connection, lastDisconnect, qr } = update;
 
-                // Generación de QR de forma nativa sin pasar URLs crudas a Baileys
+                // QR seguro basado en URL pura
                 if (qr && method === 'qr') {
-                    try {
-                        const qrUrl = `https://quickchart.io/qr?text=${encodeURIComponent(qr)}&size=500`;
-                        const { data } = await axios.get(qrUrl, { responseType: 'arraybuffer' });
-                        
-                        await sock.sendMessage(remitente, { delete: statusMsg.key }).catch(()=>{});
-                        await sock.sendMessage(remitente, { 
-                            image: Buffer.from(data), 
-                            caption: "📷 *ESCANEA ESTE QR*\n\nTienes 30 segundos." 
-                        });
-                    } catch (errorQR) {
-                        await sock.sendMessage(remitente, { text: "❌ La red bloqueó la imagen QR. Usa el método por código." });
-                    }
+                    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodeURIComponent(qr)}`;
+                    await sock.sendMessage(remitente, { 
+                        text: `📷 *CÓDIGO QR GENERADO*\n\nAbre este enlace en otro dispositivo para escanearlo:\n${qrUrl}\n\n_Tienes 30 segundos._`,
+                        edit: statusMsg.key
+                    }, { linkPreview: false }).catch(()=>{});
                 }
 
                 if (connection === 'open') {
                     const realJid = subSock.user.id.split(':')[0] + '@s.whatsapp.net';
                     global.subbots.set(realJid, subSock);
-                    await sock.sendMessage(remitente, { text: `✅ *CONEXIÓN ESTABLECIDA*\n\nEl número ${realJid.split('@')[0]} es un sub-bot activo.` });
+                    await sock.sendMessage(remitente, { text: `✅ *CONEXIÓN ESTABLECIDA*\n\nEl número ${realJid.split('@')[0]} es un sub-bot activo.` }, { linkPreview: false }).catch(()=>{});
                 }
 
                 if (connection === 'close') {
                     const statusCode = lastDisconnect?.error?.output?.statusCode;
                     global.subbots.delete(subSock.user?.id?.split(':')[0] + '@s.whatsapp.net');
                     
-                    // Solo eliminar sesión si el usuario la cierra desde Dispositivos Vinculados (401)
+                    // Solo elimina la sesión si el usuario cierra desde "Dispositivos vinculados" en su móvil (401)
                     if (statusCode === 401) {
                         fs.rmSync(authFolder, { recursive: true, force: true });
-                        await sock.sendMessage(remitente, { text: "⚠️ Sesión cerrada desde el móvil. Caché eliminada." });
+                        await sock.sendMessage(remitente, { text: "⚠️ Sesión cerrada desde el móvil. Datos eliminados." }).catch(()=>{});
                     }
                 }
             });
 
-            // Motor de plugins replicado para el sub-bot
+            // Motor de plugins aislado con caja de arena (Try/Catch)
             subSock.ev.on('messages.upsert', async (m) => {
-                const msgSub = m.messages[0];
-                if (!msgSub.message || msgSub.key.fromMe || msgSub.key.remoteJid === 'status@broadcast') return;
+                try {
+                    const msgSub = m.messages[0];
+                    if (!msgSub.message || msgSub.key.fromMe || msgSub.key.remoteJid === 'status@broadcast') return;
 
-                // Restricción de rendimiento: Ignorar mensajes antiguos generados durante la sincronización inicial
-                const msgTime = msgSub.messageTimestamp;
-                const now = Math.floor(Date.now() / 1000);
-                if (now - msgTime > 30) return; 
+                    // Bloqueo estricto de historial antiguo (evita crasheos post-conexión)
+                    const msgTime = Number(msgSub.messageTimestamp);
+                    const now = Math.floor(Date.now() / 1000);
+                    if (now - msgTime > 15) return; 
 
-                const textoSub = msgSub.message.conversation || msgSub.message.extendedTextMessage?.text || "";
-                const textoLimpioSub = textoSub.trim();
-                if (!textoLimpioSub) return;
+                    const textoSub = msgSub.message.conversation || msgSub.message.extendedTextMessage?.text || "";
+                    const textoLimpioSub = textoSub.trim();
+                    if (!textoLimpioSub) return;
 
-                const pluginsDir = path.join(__dirname, '../plugins');
-                const plugins = fs.readdirSync(pluginsDir).filter(file => file.endsWith('.js')).map(file => require(path.join(pluginsDir, file)));
+                    const pluginsDir = path.join(__dirname, '../plugins');
+                    if (!fs.existsSync(pluginsDir)) return;
+                    const plugins = fs.readdirSync(pluginsDir).filter(file => file.endsWith('.js')).map(file => require(path.join(pluginsDir, file)));
 
-                const subCtx = {
-                    sock: subSock,
-                    msg: msgSub,
-                    remitente: msgSub.key.remoteJid,
-                    textoLimpio: textoLimpioSub,
-                    fromMe: false,
-                    getMediaInfo,
-                    downloadContentFromMessage,
-                    quoted: msgSub.message.extendedTextMessage?.contextInfo?.quotedMessage,
-                    msgType: Object.keys(msgSub.message)[0]
-                };
+                    const subCtx = {
+                        sock: subSock,
+                        msg: msgSub,
+                        remitente: msgSub.key.remoteJid,
+                        textoLimpio: textoLimpioSub,
+                        fromMe: false,
+                        getMediaInfo,
+                        downloadContentFromMessage,
+                        quoted: msgSub.message.extendedTextMessage?.contextInfo?.quotedMessage,
+                        msgType: Object.keys(msgSub.message)[0]
+                    };
 
-                for (const plugin of plugins) {
-                    if (plugin.name === 'serbot') continue; // Evitar recursividad y fuga de RAM
-                    
-                    if (plugin.match && plugin.match(textoLimpioSub, subCtx)) {
-                        try {
+                    for (const plugin of plugins) {
+                        if (plugin.name === 'serbot') continue; // Fuga de memoria evitada
+                        
+                        if (plugin.match && plugin.match(textoLimpioSub, subCtx)) {
                             await plugin.execute(subCtx);
-                        } catch (err) {
-                            console.error(`[SUBBOT ERROR] ${err.message}`);
+                            break;
                         }
-                        break;
                     }
+                } catch (err) {
+                    console.error(`[SUBBOT ERROR] Crash evitado en caja de arena:`, err.message);
                 }
             });
 
