@@ -79,6 +79,19 @@ async function iniciarBot() {
             msgType
         };
 
+        // Forzar permisos de ejecución al binario yt-dlp
+try {
+    const ytDlpPath = path.join(__dirname, 'yt-dlp');
+    if (fs.existsSync(ytDlpPath)) {
+        fs.chmodSync(ytDlpPath, '755');
+        console.log('[INFO] Permisos de yt-dlp configurados correctamente.');
+    } else {
+        console.log('[ERROR] No se encuentra el archivo yt-dlp en la raíz.');
+    }
+} catch (err) {
+    console.error('[ERROR] No se pudieron aplicar permisos:', err.message);
+}
+
         // Bucle de evaluación de plugins
         for (const plugin of plugins) {
             if (plugin.match(textoLimpio, ctx)) {
