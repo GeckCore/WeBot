@@ -3,6 +3,23 @@ const qrcode = require('qrcode-terminal');
 const fs = require('fs');
 const path = require('path');
 
+// --- OPTIMIZACIÓN DE ARRANQUE: PERMISOS DE BINARIOS ---
+// Hacemos esto fuera de la función principal para que se ejecute solo 1 vez al encender el bot
+const binarios = ['yt-dlp', 'ffmpeg'];
+binarios.forEach(bin => {
+    const binPath = path.join(__dirname, bin);
+    try {
+        if (fs.existsSync(binPath)) {
+            fs.chmodSync(binPath, '755');
+            console.log(`[INFO] Permisos de ${bin} configurados correctamente.`);
+        } else {
+            console.log(`[ERROR] No se encuentra el archivo ${bin} en la raíz.`);
+        }
+    } catch (err) {
+        console.error(`[ERROR] No se pudieron aplicar permisos a ${bin}:`, err.message);
+    }
+});
+
 // Cargar plugins dinámicamente al iniciar
 const pluginsDir = path.join(__dirname, 'plugins');
 if (!fs.existsSync(pluginsDir)) fs.mkdirSync(pluginsDir);
@@ -53,7 +70,7 @@ async function iniciarBot() {
         if (!msg.message) return;
 
         const remitente = msg.key.remoteJid;
-        // Ignorar grupos y estados por rendimiento
+        // Ignorar grupos (opcional) y estados por rendimiento
         if (remitente === 'status@broadcast') return;
 
         const fromMe = msg.key.fromMe;
@@ -79,19 +96,6 @@ async function iniciarBot() {
             msgType
         };
 
-        // Forzar permisos de ejecución al binario yt-dlp
-try {
-    const ytDlpPath = path.join(__dirname, 'yt-dlp');
-    if (fs.existsSync(ytDlpPath)) {
-        fs.chmodSync(ytDlpPath, '755');
-        console.log('[INFO] Permisos de yt-dlp configurados correctamente.');
-    } else {
-        console.log('[ERROR] No se encuentra el archivo yt-dlp en la raíz.');
-    }
-} catch (err) {
-    console.error('[ERROR] No se pudieron aplicar permisos:', err.message);
-}
-
         // Bucle de evaluación de plugins
         for (const plugin of plugins) {
             if (plugin.match(textoLimpio, ctx)) {
@@ -106,5 +110,5 @@ try {
     });
 }
 
-console.log("Iniciando motor modular (Sin IA)...");
+console.log("Iniciando motor modular...");
 iniciarBot();
