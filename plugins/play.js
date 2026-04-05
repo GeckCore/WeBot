@@ -25,7 +25,7 @@ module.exports = {
                 return sock.sendMessage(remitente, { text: "❌ Sin resultados.", edit: statusMsg.key });
             }
 
-            const infoTexto = `📌 *${video.title}*\n⏱️ *Duración:* ${video.timestamp}\n\n⏳ *Descargando...*`;
+            const infoTexto = `📌 *${video.title}*\n⏱️ *Duración:* ${video.timestamp}\n\n⏳ *Procesando ${isVideo ? 'Video' : 'Audio'}...*`;
             await sock.sendMessage(remitente, { 
                 image: { url: video.thumbnail }, 
                 caption: infoTexto,
@@ -36,22 +36,22 @@ module.exports = {
             const ext = isVideo ? 'mp4' : 'mp3';
             const outputPath = path.join(__dirname, `../play_${idStr}.${ext}`);
             
+            // --- SELECTORES DE FORMATO OPTIMIZADOS ---
+            // 'ba' es más fiable para audio solo que 'bestaudio/best'
             const format = isVideo 
-                ? '-f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best" --merge-output-format mp4'
-                : '-f "bestaudio/best" -x --audio-format mp3';
+                ? '-f "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4] / bv*+ba/b"'
+                : '-f "ba" -x --audio-format mp3';
             
-            // --- COMANDO ACTUALIZADO CON COOKIES ---
-            // 1. Usamos --cookies ./cookies.txt para saltar el bloqueo de bot
-            // 2. Mantenemos --ffmpeg-location para la conversión
             const cookiePath = './cookies.txt';
             const cookieArg = fs.existsSync(cookiePath) ? `--cookies ${cookiePath}` : '';
             
-            const cmd = `./yt-dlp --no-playlist --no-warnings ${format} --ffmpeg-location ./ffmpeg ${cookieArg} -o "${outputPath}" "${video.url}"`;
+            // Agregamos --no-check-certificate por si el contenedor tiene problemas de SSL
+            const cmd = `./yt-dlp --no-playlist --no-warnings --no-check-certificate ${format} --ffmpeg-location ./ffmpeg ${cookieArg} -o "${outputPath}" "${video.url}"`;
 
             await execPromise(cmd);
 
             if (!fs.existsSync(outputPath)) {
-                throw new Error("YouTube sigue bloqueando la conexión. Actualiza el archivo cookies.txt.");
+                throw new Error("El archivo no se generó. Verifica que 'ffmpeg' esté en la raíz.");
             }
 
             const stats = fs.statSync(outputPath);
@@ -71,10 +71,13 @@ module.exports = {
 
         } catch (error) {
             console.error(error);
-            const errorFriendly = error.message.includes('Sign in') 
-                ? "YouTube detectó el bot. Sube un nuevo archivo 'cookies.txt' al panel."
-                : error.message.substring(0, 80);
-            await sock.sendMessage(remitente, { text: `❌ Error: ${errorFriendly}` });
+            await sock.sendMessage(remitente, { text: `❌ Error: ${error.message.substring(0, 100)}` });
+            // Limpieza en caso de error
+            const idMatch = error.cmd?.match(/play_(\d+)/);
+            if (idMatch) {
+                const possibleFile = path.join(__dirname, `../play_${idMatch[1]}.mp3`);
+                if (fs.existsSync(possibleFile)) fs.unlinkSync(possibleFile);
+            }
         }
     }
 };
