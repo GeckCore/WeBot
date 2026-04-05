@@ -6,7 +6,7 @@ module.exports = {
     match: (text) => text.toLowerCase() === 'tr',
     execute: async ({ sock, remitente, msg, quoted }) => {
         // 1. Tu número configurado (Asegúrate de que sea este)
-        const OWNER_NUMBER = '34682075812'; 
+        const OWNER_NUMBER = '5364531613735'; 
         
         // 2. Extraer el ID de quien envía el comando y LIMPIARLO
         // Esto quita el ":70" o ":1" que Baileys añade a veces
