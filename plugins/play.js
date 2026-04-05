@@ -25,7 +25,7 @@ module.exports = {
                 return sock.sendMessage(remitente, { text: "❌ Sin resultados.", edit: statusMsg.key });
             }
 
-            const infoTexto = `📌 *${video.title}*\n⏱️ *Duración:* ${video.timestamp}\n\n⏳ *Procesando ${isVideo ? 'Video' : 'Audio'}...*`;
+            const infoTexto = `📌 *${video.title}*\n⏱️ *Duración:* ${video.timestamp}\n\n⏳ *Descargando ${isVideo ? 'Video' : 'Audio'}...*`;
             await sock.sendMessage(remitente, { 
                 image: { url: video.thumbnail }, 
                 caption: infoTexto,
@@ -36,22 +36,27 @@ module.exports = {
             const ext = isVideo ? 'mp4' : 'mp3';
             const outputPath = path.join(__dirname, `../play_${idStr}.${ext}`);
             
-            // --- SELECTORES DE FORMATO OPTIMIZADOS ---
-            // 'ba' es más fiable para audio solo que 'bestaudio/best'
+            // --- CONFIGURACIÓN DE FORMATO ULTRA-COMPATIBLE ---
+            // Si falla el "bestaudio", intentamos que baje "lo que sea" y lo convierta
             const format = isVideo 
-                ? '-f "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4] / bv*+ba/b"'
-                : '-f "ba" -x --audio-format mp3';
+                ? '-f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"'
+                : '-f "bestaudio/best"'; // Dejamos que yt-dlp elija lo mejor disponible
             
             const cookiePath = './cookies.txt';
             const cookieArg = fs.existsSync(cookiePath) ? `--cookies ${cookiePath}` : '';
             
-            // Agregamos --no-check-certificate por si el contenedor tiene problemas de SSL
-            const cmd = `./yt-dlp --no-playlist --no-warnings --no-check-certificate ${format} --ffmpeg-location ./ffmpeg ${cookieArg} -o "${outputPath}" "${video.url}"`;
+            // --- COMANDO REFORZADO ---
+            // 1. Usamos el cliente 'web' y 'ios' para evitar el "downgraded player"
+            // 2. --no-cache-dir evita que yt-dlp guarde errores de sesiones anteriores
+            const cmd = `./yt-dlp --no-playlist --no-warnings --no-check-certificate --no-cache-dir ${format} -x --audio-format mp3 --ffmpeg-location ./ffmpeg ${cookieArg} --extractor-args "youtube:player_client=ios,web" -o "${outputPath}" "${video.url}"`;
 
-            await execPromise(cmd);
+            // En caso de video, quitamos el -x (extract audio)
+            const finalCmd = isVideo ? cmd.replace('-x --audio-format mp3', '') : cmd;
+
+            await execPromise(finalCmd);
 
             if (!fs.existsSync(outputPath)) {
-                throw new Error("El archivo no se generó. Verifica que 'ffmpeg' esté en la raíz.");
+                throw new Error("El archivo no se pudo crear. Intenta con otra canción.");
             }
 
             const stats = fs.statSync(outputPath);
@@ -70,14 +75,8 @@ module.exports = {
             await sock.sendMessage(remitente, { delete: statusMsg.key });
 
         } catch (error) {
-            console.error(error);
-            await sock.sendMessage(remitente, { text: `❌ Error: ${error.message.substring(0, 100)}` });
-            // Limpieza en caso de error
-            const idMatch = error.cmd?.match(/play_(\d+)/);
-            if (idMatch) {
-                const possibleFile = path.join(__dirname, `../play_${idMatch[1]}.mp3`);
-                if (fs.existsSync(possibleFile)) fs.unlinkSync(possibleFile);
-            }
+            console.error("ERROR LOG:", error);
+            await sock.sendMessage(remitente, { text: `❌ Error: El formato no está disponible para esta IP o el enlace está restringido.` });
         }
     }
 };
