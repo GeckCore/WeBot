@@ -36,27 +36,23 @@ module.exports = {
             const ext = isVideo ? 'mp4' : 'mp3';
             const outputPath = path.join(__dirname, `../play_${idStr}.${ext}`);
             
-            // --- CONFIGURACIÓN DE SELECCIÓN DE FORMATO RELAJADA ---
-            // 'ba/b' le dice: "Dame el mejor audio, y si no lo encuentras en la lista 'capada', dame lo mejor que haya"
+            // Selector de formato restaurado a la configuración óptima para Android/Web
             const format = isVideo 
-                ? '-f "ba+bv/b"' 
-                : '-f "ba/b"';
+                ? '-f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/b[ext=mp4]/b"' 
+                : '-f "bestaudio/best"';
             
             const cookiePath = './cookies.txt';
             const cookieArg = fs.existsSync(cookiePath) ? `--cookies ${cookiePath}` : '';
             
-            // --- COMANDO REFORZADO PARA VPS ---
-            // -4: Fuerza IPv4 (Mucho más estable en VPS que IPv6)
-            // --geo-bypass: Intenta saltar restricciones geográficas
-            // --user-agent: Simulamos un navegador real de Windows
-            const cmd = `./yt-dlp -4 --geo-bypass --no-playlist --no-warnings --no-check-certificate --no-cache-dir ${format} -x --audio-format mp3 --ffmpeg-location ./ffmpeg ${cookieArg} --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36" -o "${outputPath}" "${video.url}"`;
+            // Se inyecta --rm-cache-dir para limpiar bloqueos previos y se fuerza el cliente Android
+            const cmd = `./yt-dlp --rm-cache-dir -4 --geo-bypass --no-playlist --no-warnings --no-check-certificate ${format} -x --audio-format mp3 --ffmpeg-location ./ffmpeg ${cookieArg} --extractor-args "youtube:player_client=android" -o "${outputPath}" "${video.url}"`;
 
             const finalCmd = isVideo ? cmd.replace('-x --audio-format mp3', '') : cmd;
 
             await execPromise(finalCmd);
 
             if (!fs.existsSync(outputPath)) {
-                throw new Error("YouTube bloqueó la IP o el formato no es procesable.");
+                throw new Error("YouTube bloqueó la IP mediante la API de Android.");
             }
 
             const stats = fs.statSync(outputPath);
@@ -76,7 +72,7 @@ module.exports = {
 
         } catch (error) {
             console.error("DEBUG LOG:", error);
-            await sock.sendMessage(remitente, { text: `❌ Fallo crítico. YouTube está limitando tu VPS. Intenta con otra canción o actualiza tus cookies.` });
+            await sock.sendMessage(remitente, { text: `❌ Fallo crítico de extracción. La mitigación de Android/Cookies ha sido rechazada por el servidor.` });
         }
     }
 };
