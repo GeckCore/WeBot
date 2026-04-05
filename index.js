@@ -3,24 +3,31 @@ const qrcode = require('qrcode-terminal');
 const fs = require('fs');
 const path = require('path');
 
-// --- OPTIMIZACIÓN DE ARRANQUE: PERMISOS DE BINARIOS ---
-// Hacemos esto fuera de la función principal para que se ejecute solo 1 vez al encender el bot
+// --- OPTIMIZACIÓN DE ARRANQUE: PERMISOS Y VERIFICACIÓN DE BINARIOS ---
+const isWindows = process.platform === 'win32';
 const binarios = ['yt-dlp', 'ffmpeg'];
+
 binarios.forEach(bin => {
-    const binPath = path.join(__dirname, bin);
-    try {
-        if (fs.existsSync(binPath)) {
-            fs.chmodSync(binPath, '755');
-            console.log(`[INFO] Permisos de ${bin} configurados correctamente.`);
-        } else {
-            console.log(`[ERROR] No se encuentra el archivo ${bin} en la raíz.`);
+    const fileName = isWindows ? `${bin}.exe` : bin;
+    const binPath = path.join(__dirname, fileName);
+
+    if (fs.existsSync(binPath)) {
+        try {
+            if (!isWindows) {
+                fs.chmodSync(binPath, '755');
+                console.log(`[INFO] Permisos de ${fileName} configurados (chmod +x).`);
+            } else {
+                console.log(`[INFO] Binario ${fileName} detectado en Windows.`);
+            }
+        } catch (err) {
+            console.error(`[ERROR] No se pudieron aplicar permisos a ${fileName}:`, err.message);
         }
-    } catch (err) {
-        console.error(`[ERROR] No se pudieron aplicar permisos a ${bin}:`, err.message);
+    } else {
+        console.error(`[CRÍTICO] Falta el binario: "${fileName}" en la raíz (${__dirname}). El bot tendrá funciones limitadas.`);
     }
 });
 
-// Cargar plugins dinámicamente al iniciar
+// Cargar plugins dinámicamente
 const pluginsDir = path.join(__dirname, 'plugins');
 if (!fs.existsSync(pluginsDir)) fs.mkdirSync(pluginsDir);
 const plugins = fs.readdirSync(pluginsDir)
@@ -52,7 +59,6 @@ async function iniciarBot() {
         }
     });
 
-    // Función robusta para extraer información multimedia
     const getMediaInfo = (msgObj) => {
         if (!msgObj) return null;
         if (msgObj.videoMessage) return { type: 'video', msg: msgObj.videoMessage, ext: 'mp4' };
@@ -67,44 +73,28 @@ async function iniciarBot() {
 
     sock.ev.on('messages.upsert', async (m) => {
         const msg = m.messages[0];
-        if (!msg.message) return;
+        if (!msg.message || msg.key.remoteJid === 'status@broadcast') return;
 
         const remitente = msg.key.remoteJid;
-        // Ignorar grupos (opcional) y estados por rendimiento
-        if (remitente === 'status@broadcast') return;
-
         const fromMe = msg.key.fromMe;
         const texto = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
         const textoLimpio = texto.trim();
-
         const msgType = Object.keys(msg.message).find(k => ['videoMessage', 'imageMessage', 'documentMessage', 'audioMessage'].includes(k));
         const quoted = msg.message.extendedTextMessage?.contextInfo?.quotedMessage;
 
-        // Si es un mensaje vacío (sin texto ni multimedia), lo ignoramos
         if (!textoLimpio && !msgType) return;
 
-        // Objeto de contexto ultra-ligero que se envía a los plugins
-        const ctx = {
-            sock, 
-            msg, 
-            remitente, 
-            textoLimpio, 
-            fromMe, 
-            getMediaInfo, 
-            downloadContentFromMessage,
-            quoted,
-            msgType
-        };
+        const ctx = { sock, msg, remitente, textoLimpio, fromMe, getMediaInfo, downloadContentFromMessage, quoted, msgType };
 
-        // Bucle de evaluación de plugins
         for (const plugin of plugins) {
             if (plugin.match(textoLimpio, ctx)) {
                 try {
                     await plugin.execute(ctx);
                 } catch (err) {
+                    console.error(`Error en plugin ${plugin.name}:`, err);
                     await sock.sendMessage(remitente, { text: `❌ Error interno (${plugin.name}): ${err.message}` });
                 }
-                break; // Corta el bucle, solo ejecuta un plugin por mensaje
+                break;
             }
         }
     });
