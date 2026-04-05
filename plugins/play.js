@@ -1,10 +1,5 @@
 // plugins/play.js
 const yts = require('yt-search');
-const { exec } = require('child_process');
-const util = require('util');
-const fs = require('fs');
-const path = require('path');
-const execPromise = util.promisify(exec);
 
 module.exports = {
     name: 'play',
@@ -18,6 +13,7 @@ module.exports = {
         let statusMsg = await sock.sendMessage(remitente, { text: `🔍 Buscando "${query}"...` });
 
         try {
+            // 1. Búsqueda (Esto no lo bloquea YouTube)
             const searchRes = await yts({ query, hl: 'es', gl: 'ES' });
             const video = searchRes.videos[0];
 
@@ -25,58 +21,62 @@ module.exports = {
                 return sock.sendMessage(remitente, { text: "❌ Sin resultados.", edit: statusMsg.key });
             }
 
-            const infoTexto = `📌 *${video.title}*\n⏱️ *Duración:* ${video.timestamp}\n\n⏳ *Procesando ${isVideo ? 'Video' : 'Audio'}...*`;
+            const infoTexto = `📌 *${video.title}*\n⏱️ *Duración:* ${video.timestamp}\n\n⏳ *Extrayendo desde servidores externos...*`;
             await sock.sendMessage(remitente, { 
                 image: { url: video.thumbnail }, 
                 caption: infoTexto,
                 edit: statusMsg.key
             });
 
-            const idStr = Date.now().toString();
-            const ext = isVideo ? 'mp4' : 'mp3';
-            const outputPath = path.join(__dirname, `../play_${idStr}.${ext}`);
-            
-            // Selector "Fuerza Bruta": ba (best audio) o b (best video/audio combinado)
-            const format = isVideo ? '-f "b"' : '-f "ba/b"';
-            
-            const cookiePath = './cookies.txt';
-            const cookieArg = fs.existsSync(cookiePath) ? `--cookies ${cookiePath}` : '';
-            
-            // Eliminado el client_player=android. Usamos cliente web puro + cookies + fallback de formato
-            const cmd = `./yt-dlp --no-playlist --no-warnings --no-check-certificate ${format} -x --audio-format mp3 --ffmpeg-location ./ffmpeg ${cookieArg} -o "${outputPath}" "${video.url}"`;
+            // 2. Lista de APIs externas para saltar el bloqueo de IP de la VPS
+            const encodedUrl = encodeURIComponent(video.url);
+            const apis = isVideo ? [
+                `https://api.ryzendesu.vip/api/downloader/ytmp4?url=${encodedUrl}`,
+                `https://api.dorratz.com/v2/yt-mp4?url=${encodedUrl}`,
+                `https://ruby-core.vercel.app/api/download/youtube/mp4?url=${encodedUrl}`
+            ] : [
+                `https://api.ryzendesu.vip/api/downloader/ytmp3?url=${encodedUrl}`,
+                `https://api.dorratz.com/v2/yt-mp3?url=${encodedUrl}`,
+                `https://ruby-core.vercel.app/api/download/youtube/mp3?url=${encodedUrl}`
+            ];
 
-            const finalCmd = isVideo ? cmd.replace('-x --audio-format mp3', '') : cmd;
+            let finalUrl = null;
 
-            await execPromise(finalCmd);
-
-            if (!fs.existsSync(outputPath)) {
-                throw new Error("Archivo no generado.");
+            // 3. Iterar sobre las APIs hasta que una funcione
+            for (const api of apis) {
+                try {
+                    const res = await fetch(api);
+                    if (!res.ok) continue;
+                    
+                    const json = await res.json();
+                    
+                    // Extraer la URL de descarga según la estructura de la API
+                    finalUrl = json?.url || json?.data?.url || json?.download?.url || json?.result?.url || json?.data?.download;
+                    
+                    if (finalUrl) break; 
+                } catch (e) {
+                    continue; // Falla silenciosamente y prueba la siguiente
+                }
             }
 
-            const stats = fs.statSync(outputPath);
-            if (stats.size / (1024 * 1024) > 50) {
-                fs.unlinkSync(outputPath);
-                return sock.sendMessage(remitente, { text: `⚠️ El archivo supera los 50MB.` });
+            if (!finalUrl) {
+                return sock.sendMessage(remitente, { text: `❌ Las APIs de extracción están saturadas. Inténtalo en unos minutos.`, edit: statusMsg.key });
             }
+
+            // 4. Enviar directamente a WhatsApp (Baileys procesa la URL sin guardarla en disco)
+            await sock.sendMessage(remitente, { text: "🚀 Transmitiendo archivo...", edit: statusMsg.key });
 
             if (isVideo) {
-                await sock.sendMessage(remitente, { video: { url: outputPath }, mimetype: 'video/mp4', caption: `✅ ${video.title}` }, { quoted: msg });
+                await sock.sendMessage(remitente, { video: { url: finalUrl }, mimetype: 'video/mp4', caption: `✅ ${video.title}` }, { quoted: msg });
             } else {
-                await sock.sendMessage(remitente, { audio: { url: outputPath }, mimetype: 'audio/mpeg', fileName: `${video.title}.mp3` }, { quoted: msg });
+                await sock.sendMessage(remitente, { audio: { url: finalUrl }, mimetype: 'audio/mpeg' }, { quoted: msg });
             }
 
-            if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
             await sock.sendMessage(remitente, { delete: statusMsg.key });
 
         } catch (error) {
-            console.error("DEBUG LOG:", error);
-            await sock.sendMessage(remitente, { text: `❌ Error: YouTube ha bloqueado el formato para esta IP. La extracción falló.` });
-            
-            const idMatch = error.cmd?.match(/play_(\d+)/);
-            if (idMatch) {
-                const possibleFile = path.join(__dirname, `../play_${idMatch[1]}.mp3`);
-                if (fs.existsSync(possibleFile)) fs.unlinkSync(possibleFile);
-            }
+            console.error(error);
+            await sock.sendMessage(remitente, { text: `❌ Error en el proceso: ${error.message}` });
         }
     }
 };
