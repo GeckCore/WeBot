@@ -1,5 +1,5 @@
 // plugins/serbot.js
-const { default: makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion, downloadContentFromMessage } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion, Browsers } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const fs = require('fs');
 const path = require('path');
@@ -10,7 +10,7 @@ module.exports = {
     name: 'serbot',
     match: (text) => /^(serbot|bots)/i.test(text),
     execute: async (ctx) => {
-        const { sock, remitente, textoLimpio, getMediaInfo } = ctx;
+        const { sock, remitente, textoLimpio, getMediaInfo, downloadContentFromMessage } = ctx;
         const match = textoLimpio.match(/^(serbot|bots)(?:\s+(.+))?$/i);
         const command = match[1].toLowerCase();
         const args = match[2] ? match[2].trim().split(' ') : [];
@@ -54,13 +54,15 @@ module.exports = {
 
             const subSock = makeWASocket({
                 version,
-                logger: pino({ level: 'silent' }), // Silenciado para evitar cruce de datos
+                logger: pino({ level: 'silent' }), 
                 auth: state,
                 printQRInTerminal: false,
-                browser: ['Ubuntu', 'Chrome', '122.0.0.0'], 
+                browser: Browsers.macOS('Desktop'), // Firma nativa oficial para evitar el estancamiento de sesión
                 syncFullHistory: false,
-                markOnlineOnConnect: true,
-                generateHighQualityLinkPreview: false // Desactiva el uso de Sharp para enlaces
+                msgRetryCounterCache: new Map(), // VITAL: Evita que el handshake de WhatsApp se cuelgue
+                getMessage: async (key) => {
+                    return { conversation: 'sincronizando' }; // VITAL: Responde a la petición del móvil para avanzar
+                }
             });
 
             subSock.ev.on('creds.update', saveCreds);
@@ -70,8 +72,9 @@ module.exports = {
                 const numeroTarget = args[1] ? args[1].replace(/[^0-9]/g, '') : subbotId;
                 setTimeout(async () => {
                     try {
-                        const code = await subSock.requestPairingCode(numeroTarget);
-                        await sock.sendMessage(remitente, { text: `🔢 *CÓDIGO:*\n\n*${code}*\n\nVe a WhatsApp > Dispositivos vinculados.`, edit: statusMsg.key }, { linkPreview: false });
+                        let code = await subSock.requestPairingCode(numeroTarget);
+                        code = code?.match(/.{1,4}/g)?.join("-") || code; // Formatea el código a XXXX-XXXX
+                        await sock.sendMessage(remitente, { text: `🔢 *CÓDIGO DE VINCULACIÓN:*\n\n*${code}*\n\nVe a WhatsApp > Dispositivos vinculados > Vincular con el número de teléfono.`, edit: statusMsg.key }, { linkPreview: false });
                     } catch (err) {
                         await sock.sendMessage(remitente, { text: `❌ Error al generar código: ${err.message}`, edit: statusMsg.key });
                     }
@@ -81,40 +84,39 @@ module.exports = {
             subSock.ev.on('connection.update', async (update) => {
                 const { connection, lastDisconnect, qr } = update;
 
-                // QR seguro basado en URL pura
+                // Enviar QR como imagen directamente (Restaurado)
                 if (qr && method === 'qr') {
-                    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodeURIComponent(qr)}`;
+                    const qrUrl = `https://quickchart.io/qr?text=${encodeURIComponent(qr)}&size=500`;
                     await sock.sendMessage(remitente, { 
-                        text: `📷 *CÓDIGO QR GENERADO*\n\nAbre este enlace en otro dispositivo para escanearlo:\n${qrUrl}\n\n_Tienes 30 segundos._`,
-                        edit: statusMsg.key
-                    }, { linkPreview: false }).catch(()=>{});
+                        image: { url: qrUrl }, 
+                        caption: "📷 *ESCANEA ESTE QR*\n\nTienes 30 segundos antes de que caduque." 
+                    }, { edit: statusMsg.key }).catch(()=>{});
                 }
 
                 if (connection === 'open') {
                     const realJid = subSock.user.id.split(':')[0] + '@s.whatsapp.net';
                     global.subbots.set(realJid, subSock);
-                    await sock.sendMessage(remitente, { text: `✅ *CONEXIÓN ESTABLECIDA*\n\nEl número ${realJid.split('@')[0]} es un sub-bot activo.` }, { linkPreview: false }).catch(()=>{});
+                    await sock.sendMessage(remitente, { text: `✅ *CONEXIÓN ESTABLECIDA*\n\nEl número ${realJid.split('@')[0]} es ahora un sub-bot activo.` });
                 }
 
                 if (connection === 'close') {
                     const statusCode = lastDisconnect?.error?.output?.statusCode;
                     global.subbots.delete(subSock.user?.id?.split(':')[0] + '@s.whatsapp.net');
                     
-                    // Solo elimina la sesión si el usuario cierra desde "Dispositivos vinculados" en su móvil (401)
-                    if (statusCode === 401) {
+                    // 401 = Sesión cerrada desde el móvil. 403 = Baneado/Desvinculado por WhatsApp.
+                    if (statusCode === 401 || statusCode === 403) {
                         fs.rmSync(authFolder, { recursive: true, force: true });
-                        await sock.sendMessage(remitente, { text: "⚠️ Sesión cerrada desde el móvil. Datos eliminados." }).catch(()=>{});
+                        await sock.sendMessage(remitente, { text: "⚠️ Sesión cerrada. Los archivos de vinculación han sido eliminados." }).catch(()=>{});
                     }
                 }
             });
 
-            // Motor de plugins aislado con caja de arena (Try/Catch)
+            // Motor de plugins aislado
             subSock.ev.on('messages.upsert', async (m) => {
                 try {
                     const msgSub = m.messages[0];
                     if (!msgSub.message || msgSub.key.fromMe || msgSub.key.remoteJid === 'status@broadcast') return;
 
-                    // Bloqueo estricto de historial antiguo (evita crasheos post-conexión)
                     const msgTime = Number(msgSub.messageTimestamp);
                     const now = Math.floor(Date.now() / 1000);
                     if (now - msgTime > 15) return; 
@@ -140,7 +142,7 @@ module.exports = {
                     };
 
                     for (const plugin of plugins) {
-                        if (plugin.name === 'serbot') continue; // Fuga de memoria evitada
+                        if (plugin.name === 'serbot') continue; 
                         
                         if (plugin.match && plugin.match(textoLimpioSub, subCtx)) {
                             await plugin.execute(subCtx);
@@ -148,7 +150,7 @@ module.exports = {
                         }
                     }
                 } catch (err) {
-                    console.error(`[SUBBOT ERROR] Crash evitado en caja de arena:`, err.message);
+                    // Previene que Sharp o cualquier fallo tumbe el proceso
                 }
             });
 
