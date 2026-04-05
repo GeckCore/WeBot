@@ -25,7 +25,7 @@ module.exports = {
                 return sock.sendMessage(remitente, { text: "❌ Sin resultados.", edit: statusMsg.key });
             }
 
-            const infoTexto = `📌 *${video.title}*\n⏱️ *Duración:* ${video.timestamp}\n\n⏳ *Descargando ${isVideo ? 'Video' : 'Audio'}...*`;
+            const infoTexto = `📌 *${video.title}*\n⏱️ *Duración:* ${video.timestamp}\n\n⏳ *Procesando ${isVideo ? 'Video' : 'Audio'}...*`;
             await sock.sendMessage(remitente, { 
                 image: { url: video.thumbnail }, 
                 caption: infoTexto,
@@ -36,27 +36,27 @@ module.exports = {
             const ext = isVideo ? 'mp4' : 'mp3';
             const outputPath = path.join(__dirname, `../play_${idStr}.${ext}`);
             
-            // --- CONFIGURACIÓN DE FORMATO ULTRA-COMPATIBLE ---
-            // Si falla el "bestaudio", intentamos que baje "lo que sea" y lo convierta
+            // --- CONFIGURACIÓN DE SELECCIÓN DE FORMATO RELAJADA ---
+            // 'ba/b' le dice: "Dame el mejor audio, y si no lo encuentras en la lista 'capada', dame lo mejor que haya"
             const format = isVideo 
-                ? '-f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"'
-                : '-f "bestaudio/best"'; // Dejamos que yt-dlp elija lo mejor disponible
+                ? '-f "ba+bv/b"' 
+                : '-f "ba/b"';
             
             const cookiePath = './cookies.txt';
             const cookieArg = fs.existsSync(cookiePath) ? `--cookies ${cookiePath}` : '';
             
-            // --- COMANDO REFORZADO ---
-            // 1. Usamos el cliente 'web' y 'ios' para evitar el "downgraded player"
-            // 2. --no-cache-dir evita que yt-dlp guarde errores de sesiones anteriores
-            const cmd = `./yt-dlp --no-playlist --no-warnings --no-check-certificate --no-cache-dir ${format} -x --audio-format mp3 --ffmpeg-location ./ffmpeg ${cookieArg} --extractor-args "youtube:player_client=ios,web" -o "${outputPath}" "${video.url}"`;
+            // --- COMANDO REFORZADO PARA VPS ---
+            // -4: Fuerza IPv4 (Mucho más estable en VPS que IPv6)
+            // --geo-bypass: Intenta saltar restricciones geográficas
+            // --user-agent: Simulamos un navegador real de Windows
+            const cmd = `./yt-dlp -4 --geo-bypass --no-playlist --no-warnings --no-check-certificate --no-cache-dir ${format} -x --audio-format mp3 --ffmpeg-location ./ffmpeg ${cookieArg} --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36" -o "${outputPath}" "${video.url}"`;
 
-            // En caso de video, quitamos el -x (extract audio)
             const finalCmd = isVideo ? cmd.replace('-x --audio-format mp3', '') : cmd;
 
             await execPromise(finalCmd);
 
             if (!fs.existsSync(outputPath)) {
-                throw new Error("El archivo no se pudo crear. Intenta con otra canción.");
+                throw new Error("YouTube bloqueó la IP o el formato no es procesable.");
             }
 
             const stats = fs.statSync(outputPath);
@@ -75,8 +75,8 @@ module.exports = {
             await sock.sendMessage(remitente, { delete: statusMsg.key });
 
         } catch (error) {
-            console.error("ERROR LOG:", error);
-            await sock.sendMessage(remitente, { text: `❌ Error: El formato no está disponible para esta IP o el enlace está restringido.` });
+            console.error("DEBUG LOG:", error);
+            await sock.sendMessage(remitente, { text: `❌ Fallo crítico. YouTube está limitando tu VPS. Intenta con otra canción o actualiza tus cookies.` });
         }
     }
 };
