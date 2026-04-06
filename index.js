@@ -4,46 +4,32 @@ const fs = require('fs');
 const path = require('path');
 const lodash = require('lodash');
 
-// --- MOTOR DE BASE DE DATOS (Persistencia para warns, niveles, etc.) ---
-const Low = require('lowdb');
-const JSONFile = require('lowdb/adapters/JSONFile');
+// --- MOTOR DE BASE DE DATOS (Sintaxis Correcta para lowdb@1.0.0) ---
+const low = require('lowdb');
+const FileSync = require('lowdb/adapters/FileSync');
+const adapter = new FileSync('database.json');
 
-// Inicializamos la DB en el objeto global para que los plugins accedan a global.db.data
-global.db = new Low(new JSONFile('database.json'));
+// Inicializamos la base de datos de forma síncrona (como requiere v1.0.0)
+global.db = low(adapter);
 
-async function loadDatabase() {
-    if (global.db.data) return;
-    await global.db.read();
-    global.db.data = {
-        users: {},
-        chats: {},
-        settings: {},
-        ...(global.db.data || {}),
-    };
-    global.db.chain = lodash.chain(global.db.data);
-    console.log('[INFO] Base de datos cargada correctamente.');
-}
-loadDatabase();
+// Establecemos los valores por defecto si el archivo está vacío
+global.db.defaults({ 
+    users: {}, 
+    chats: {}, 
+    settings: {} 
+}).write();
 
-// --- OPTIMIZACIÓN DE ARRANQUE: PERMISOS Y VERIFICACIÓN DE BINARIOS ---
+console.log('[INFO] Base de datos JSON cargada y lista.');
+
+// --- OPTIMIZACIÓN DE ARRANQUE: BINARIOS ---
 const isWindows = process.platform === 'win32';
 const binarios = ['yt-dlp', 'ffmpeg'];
 
 binarios.forEach(bin => {
     const fileName = isWindows ? `${bin}.exe` : bin;
     const binPath = path.join(__dirname, fileName);
-
-    if (fs.existsSync(binPath)) {
-        try {
-            if (!isWindows) {
-                fs.chmodSync(binPath, '755');
-                console.log(`[INFO] Permisos de ${fileName} configurados.`);
-            }
-        } catch (err) {
-            console.error(`[ERROR] No se pudieron aplicar permisos a ${fileName}:`, err.message);
-        }
-    } else {
-        console.error(`[CRÍTICO] Falta binario: "${fileName}" en la raíz.`);
+    if (fs.existsSync(binPath) && !isWindows) {
+        try { fs.chmodSync(binPath, '755'); } catch (e) {}
     }
 });
 
@@ -58,8 +44,6 @@ async function iniciarBot() {
     const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
     const { version, isLatest } = await fetchLatestBaileysVersion();
     
-    console.log(`[INFO] Versión WA Web: ${version.join('.')} (Última: ${isLatest})`);
-
     const sock = makeWASocket({
         version, 
         auth: state, 
@@ -87,9 +71,6 @@ async function iniciarBot() {
         if (msgObj.imageMessage) return { type: 'image', msg: msgObj.imageMessage, ext: 'jpg' };
         if (msgObj.audioMessage) return { type: 'audio', msg: msgObj.audioMessage, ext: 'ogg' };
         if (msgObj.documentMessage) return { type: 'document', msg: msgObj.documentMessage, ext: 'bin' };
-        if (msgObj.documentWithCaptionMessage?.message?.documentMessage) {
-            return { type: 'document', msg: msgObj.documentWithCaptionMessage.message.documentMessage, ext: 'bin' };
-        }
         return null;
     };
 
@@ -97,31 +78,21 @@ async function iniciarBot() {
         const msg = m.messages[0];
         if (!msg.message || msg.key.remoteJid === 'status@broadcast') return;
 
-        // Auto-guardado de DB al recibir mensaje si hay cambios
-        if (global.db.data) await global.db.write();
+        // En lowdb v1, el acceso a datos es directo a través de .getState()
+        // o simplemente configurando global.db.data para compatibilidad con tus plugins
+        global.db.data = global.db.getState();
 
         const remitente = msg.key.remoteJid;
-        const fromMe = msg.key.fromMe;
         const texto = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
         const textoLimpio = texto.trim();
-        
-        // Identificar si es un mensaje multimedia
-        const msgType = Object.keys(msg.message).find(k => 
-            ['videoMessage', 'imageMessage', 'documentMessage', 'audioMessage'].includes(k)
-        );
-        
-        // Extraer mensaje citado
+        const msgType = Object.keys(msg.message).find(k => ['videoMessage', 'imageMessage', 'documentMessage', 'audioMessage'].includes(k));
         const quoted = msg.message.extendedTextMessage?.contextInfo?.quotedMessage;
 
-        if (!textoLimpio && !msgType) return;
-
-        // Contexto centralizado para los plugins
         const ctx = { 
             sock, 
             msg, 
             remitente, 
             textoLimpio, 
-            fromMe, 
             getMediaInfo, 
             downloadContentFromMessage, 
             quoted, 
@@ -132,9 +103,10 @@ async function iniciarBot() {
             if (plugin.match(textoLimpio, ctx)) {
                 try {
                     await plugin.execute(ctx);
+                    // Guardamos los cambios en el archivo tras ejecutar un comando
+                    global.db.write();
                 } catch (err) {
                     console.error(`Error en plugin ${plugin.name}:`, err);
-                    await sock.sendMessage(remitente, { text: `❌ Error interno (${plugin.name}): ${err.message}` });
                 }
                 break;
             }
@@ -142,5 +114,4 @@ async function iniciarBot() {
     });
 }
 
-console.log("Iniciando motor modular con persistencia...");
 iniciarBot();
