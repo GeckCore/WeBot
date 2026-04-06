@@ -29,6 +29,8 @@ const descriptions = {
             'tagall.js': 'Mención masiva en grupos. (!tagall)',
             'tomp3.js': 'Extrae audio de video. (Responder "mp3" a video)',
             'translate.js': 'Traductor rápido. (Responder "t" a mensaje)',
+            'qr.js': 'Crea un QR. (Responder con ".qr" a mensaje)',
+            'readqr.js': 'Lee un QR. (Responder a imagen de QR)',
             'web_screenshot.js': 'Captura de pantalla web. (view + link)'
         };
 
