@@ -3,21 +3,25 @@ const cheerio = require('cheerio');
 
 module.exports = {
     name: 'igstalk',
-    // Match para .igstalk [usuario] o .ig [usuario]
-    match: (text) => /^\.(igstalk|ig)\s+.+$/i.test(text),
+    // Ahora acepta: .ig, .igstalk, ig, igstalk (con o sin punto)
+    match: (text) => /^(\.)?(igstalk|ig)\s+.+$/i.test(text),
 
     execute: async ({ sock, remitente, msg, textoLimpio }) => {
-        const user = textoLimpio.split(/\s+/)[1].replace(/^@/, '');
+        // Extraer el usuario correctamente
+        const args = textoLimpio.split(/\s+/);
+        const user = args[1].replace(/^@/, '');
         
+        console.log(`[PLUGIN] Ejecutando igstalk para: ${user}`);
         await sock.sendMessage(remitente, { text: `🔍 Buscando a *@${user}*...` }, { quoted: msg });
 
         try {
+            // Usamos un mirror de Instagram más estable que Dumpor
             const data = await igstalk(user);
             
             const informe = `👤 *PERFIL DE INSTAGRAM*\n\n` +
-                `✨ *Nombre:* ${data.fullname || 'No definido'}\n` +
+                `✨ *Nombre:* ${data.fullname}\n` +
                 `🆔 *User:* @${data.username}\n` +
-                `📝 *Bio:* ${data.bio || 'Sin biografía'}\n\n` +
+                `📝 *Bio:* ${data.bio}\n\n` +
                 `📊 *ESTADÍSTICAS*\n` +
                 `🔹 *Seguidores:* ${data.followers}\n` +
                 `🔸 *Seguidos:* ${data.following}\n` +
@@ -30,9 +34,9 @@ module.exports = {
             }, { quoted: msg });
 
         } catch (e) {
-            console.error('Error en igstalk:', e);
+            console.error('Error en igstalk:', e.message);
             await sock.sendMessage(remitente, { 
-                text: `❌ *Error:* No se pudo encontrar al usuario. Es posible que la cuenta sea privada o el nombre sea incorrecto.` 
+                text: `❌ *Error:* No se encontró el perfil. Puede que sea privado o no exista.` 
             }, { quoted: msg });
         }
     }
@@ -40,27 +44,24 @@ module.exports = {
 
 async function igstalk(Username) {
     try {
-        const { data } = await axios.get(`https://dumpor.com/v/${Username}`, {
+        // Cambiamos a Imginn, que suele tener menos bloqueos de IP en VPS
+        const { data } = await axios.get(`https://imginn.com/${Username}/`, {
             headers: {
-                'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36'
+                'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'
             }
         });
         const $ = cheerio.load(data);
         
-        // Extracción optimizada
-        const profileRaw = $('.user__img').attr('style') || '';
-        const profile = profileRaw.match(/url\(['"]?(.*?)['"]?\)/)?.[1] || 'https://cdn-icons-png.flaticon.com/512/149/149071.png';
-        
         return {
-            profile,
-            fullname: $('.user__title h1').text().trim(),
-            username: $('.user__title h4').text().trim().replace('@', ''),
-            post: $('.list-inline-item:contains("Posts")').text().replace(/[^\d.KM]/g, '').trim() || '0',
-            followers: $('.list-inline-item:contains("Followers")').text().replace(/[^\d.KM]/g, '').trim() || '0',
-            following: $('.list-inline-item:contains("Following")').text().replace(/[^\d.KM]/g, '').trim() || '0',
-            bio: $('.user__info-desc').text().trim()
+            profile: $('.info .img img').attr('src') || 'https://cdn-icons-png.flaticon.com/512/149/149071.png',
+            fullname: $('.info .name').text().trim() || Username,
+            username: Username,
+            post: $('.info .stats li').eq(0).find('span').text().trim() || '0',
+            followers: $('.info .stats li').eq(1).find('span').text().trim() || '0',
+            following: $('.info .stats li').eq(2).find('span').text().trim() || '0',
+            bio: $('.info .desc').text().trim() || 'Sin descripción'
         };
     } catch (err) {
-        throw new Error('Usuario no encontrado');
+        throw new Error('No se pudo acceder al perfil');
     }
 }
