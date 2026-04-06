@@ -39,7 +39,7 @@ const descriptions = {
             menuText += `╰─ ${desc}\n\n`;
         });
 
-        menuText += `⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n`;
+        menuText += `⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n`;
         menuText += `*Node.js Engine v18.x* | *2026*`;
 
         await sock.sendMessage(remitente, { 
