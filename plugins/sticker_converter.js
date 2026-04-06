@@ -28,8 +28,8 @@ module.exports = {
             // -vcodec webp: Fuerza el decodificador correcto para webp animado
             // -probesize / -analyzeduration: Ayuda a detectar frames en archivos mal formados
             const ffmpegCmd = isAnimated 
-                ? `./ffmpeg -vcodec webp -probesize 10M -analyzeduration 10M -i ${tempWebp} -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p" -c:v libx264 -preset fast -crf 22 -movflags faststart ${tempOut}`
-                : `./ffmpeg -i ${tempWebp} ${tempOut}`;
+    ? `./ffmpeg -i ${tempWebp} -pix_fmt yuv420p -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" -c:v libx264 -preset fast -crf 22 -movflags faststart ${tempOut}`
+    : `./ffmpeg -i ${tempWebp} ${tempOut}`;
 
             await execPromise(ffmpegCmd);
 
