@@ -1,59 +1,46 @@
-const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
+const fs = require('fs');
+const path = require('path');
 
 module.exports = {
-    name: 'revelar',
-    // Match para los comandos que traía tu código: read, revelar, readvo
-    match: (text, ctx) => /^(readviewonce|read|revelar|readvo|ver)$/i.test(text) && ctx.quoted,
+    name: 'ver_efimero',
+    match: (text, ctx) => /^ver$/i.test(text) && ctx.msg.message.extendedTextMessage?.contextInfo?.stanzaId,
     
-    execute: async ({ sock, remitente, msg, quoted }) => {
-        // 1. Detectar el contenedor de "Ver una vez" (V1, V2 o Extension)
-        const viewOnce = quoted.viewOnceMessageV2 || quoted.viewOnceMessage || quoted.viewOnceMessageV2Extension;
+    execute: async ({ sock, remitente, msg }) => {
+        const quotedId = msg.message.extendedTextMessage.contextInfo.stanzaId;
+        const folder = path.join(__dirname, '../data/viewonce');
 
-        if (!viewOnce) return; // Si no es efímero, no hace nada.
+        if (!fs.existsSync(folder)) {
+            return sock.sendMessage(remitente, { text: "❌ No hay caché generado." }, { quoted: msg });
+        }
 
-        const actualMsg = viewOnce.message;
-        const type = Object.keys(actualMsg)[0]; // imageMessage, videoMessage o audioMessage
-        const mediaData = actualMsg[type];
+        // Buscamos cualquier archivo que coincida con el ID, sin importar la extensión
+        const files = fs.readdirSync(folder);
+        const targetFile = files.find(f => f.startsWith(quotedId));
+
+        if (!targetFile) {
+            return sock.sendMessage(remitente, { text: "❌ *Error:* El archivo no está en caché. (El bot estaba apagado cuando llegó o ya pasaron 2 horas)." }, { quoted: msg });
+        }
+
+        const filePath = path.join(folder, targetFile);
+        const buffer = fs.readFileSync(filePath);
 
         try {
-            // 2. Descargar el buffer
-            const stream = await downloadContentFromMessage(
-                mediaData, 
-                type === 'imageMessage' ? 'image' : type === 'videoMessage' ? 'video' : 'audio'
-            );
-
-            let buffer = Buffer.from([]);
-            for await (const chunk of stream) {
-                buffer = Buffer.concat([buffer, chunk]);
-            }
-
-            // 3. Reenviar según el tipo detectado
-            if (/video/.test(type)) {
-                return await sock.sendMessage(remitente, { 
+            // Diferenciamos el envío según la extensión guardada
+            if (targetFile.endsWith('.mp4')) {
+                await sock.sendMessage(remitente, { 
                     video: buffer, 
-                    caption: mediaData.caption || '✅ Video revelado',
+                    caption: "✅ *Video de tarea recuperado.*",
                     mimetype: 'video/mp4'
                 }, { quoted: msg });
-            } 
-            
-            if (/image/.test(type)) {
-                return await sock.sendMessage(remitente, { 
+            } else {
+                await sock.sendMessage(remitente, { 
                     image: buffer, 
-                    caption: mediaData.caption || '✅ Imagen revelada'
+                    caption: "✅ *Foto de tarea recuperada.*" 
                 }, { quoted: msg });
             }
-
-            if (/audio/.test(type)) {
-                return await sock.sendMessage(remitente, { 
-                    audio: buffer, 
-                    ptt: true,
-                    mimetype: 'audio/ogg; codecs=opus'
-                }, { quoted: msg });
-            }
-
-        } catch (error) {
-            console.error('Error en revelar:', error);
-            await sock.sendMessage(remitente, { text: '❌ El archivo ya no está disponible en los servidores de WA.' });
+        } catch (err) {
+            console.error("Error al enviar caché:", err);
+            await sock.sendMessage(remitente, { text: "❌ Error interno al leer el archivo." });
         }
     }
 };
