@@ -17,8 +17,12 @@ binarios.forEach(bin => {
     }
 });
 
+// --- CREACIÓN FORZADA DE CARPETAS DE CACHÉ ---
 const pluginsDir = path.join(__dirname, 'plugins');
-if (!fs.existsSync(pluginsDir)) fs.mkdirSync(pluginsDir);
+const cacheDir = path.join(__dirname, 'data/viewonce');
+if (!fs.existsSync(pluginsDir)) fs.mkdirSync(pluginsDir, { recursive: true });
+if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true });
+
 const plugins = fs.readdirSync(pluginsDir)
     .filter(file => file.endsWith('.js'))
     .map(file => require(path.join(pluginsDir, file)));
@@ -54,17 +58,22 @@ async function iniciarBot() {
 
         const remitente = msg.key.remoteJid;
         const fromMe = msg.key.fromMe;
+        
+        // --- LOGGER GLOBAL (DEBUGGER) ---
+        // Esto es exactamente lo que sugeriste. Imprimirá las "llaves" del JSON que manda WhatsApp.
+        const llavesInternas = Object.keys(msg.message).join(', ');
+        console.log(`[LOG] Msj de: ${remitente.split('@')[0]} | Estructura: ${llavesInternas}`);
+
         const texto = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
         const textoLimpio = texto.trim();
 
-        // --- DESENVOLVER EL MENSAJE (CERO ERRORES DE LECTURA) ---
         let actualMsg = msg.message;
         let isViewOnce = false;
 
-        // 1. Quitar capa de mensaje temporal (si el grupo lo tiene activo)
+        // Bypass Ephemeral
         if (actualMsg?.ephemeralMessage) actualMsg = actualMsg.ephemeralMessage.message;
 
-        // 2. Quitar capa de ViewOnce
+        // Bypass ViewOnce Containers
         if (actualMsg?.viewOnceMessageV2) {
             actualMsg = actualMsg.viewOnceMessageV2.message;
             isViewOnce = true;
@@ -76,20 +85,15 @@ async function iniciarBot() {
             isViewOnce = true;
         }
 
-        // 3. Identificar si hay contenido multimedia real
         const mediaType = Object.keys(actualMsg || {}).find(k => ['videoMessage', 'imageMessage', 'audioMessage', 'documentMessage'].includes(k));
         const quoted = msg.message.extendedTextMessage?.contextInfo?.quotedMessage;
 
-        // --- INTERCEPTOR DE EFÍMEROS ---
+        // --- EXTRACCIÓN AL DISCO ---
         if (isViewOnce && mediaType) {
-            console.log(`[SISTEMA] 👁️ Detectado ViewOnce entrante: ${mediaType}`);
+            console.log(`[SISTEMA] 👁️ Procesando ViewOnce interno de tipo: ${mediaType}`);
             
             const mediaData = actualMsg[mediaType];
-            const folder = path.join(__dirname, 'data/viewonce');
-            if (!fs.existsSync(folder)) fs.mkdirSync(folder, { recursive: true });
-
             try {
-                // Descarga exacta indicando 'image' o 'video'
                 const downloadType = mediaType.replace('Message', ''); 
                 const stream = await downloadContentFromMessage(mediaData, downloadType);
                 
@@ -97,17 +101,16 @@ async function iniciarBot() {
                 for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
                 
                 const ext = mediaType === 'imageMessage' ? 'jpg' : mediaType === 'videoMessage' ? 'mp4' : 'ogg';
-                const filePath = path.join(folder, `${msg.key.id}.${ext}`);
+                const filePath = path.join(cacheDir, `${msg.key.id}.${ext}`);
                 fs.writeFileSync(filePath, buffer);
                 
-                console.log(`[SISTEMA] ✅ Guardado con éxito en caché: ${msg.key.id}.${ext}`);
+                console.log(`[SISTEMA] ✅ Guardado exitoso: ${msg.key.id}.${ext}`);
                 
-                // Auto-limpieza en 2 horas
                 setTimeout(() => {
                     if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
                 }, 7200000);
             } catch (e) {
-                console.error(`[ERROR] Fallo crítico al descargar el efímero:`, e);
+                console.error(`[ERROR] Fallo al descargar el stream:`, e.message);
             }
         }
 
