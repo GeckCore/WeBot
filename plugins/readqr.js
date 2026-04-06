@@ -1,8 +1,8 @@
-const Jimp = require('jimp');
+const sharp = require('sharp');
 const jsQR = require('jsqr');
 
 module.exports = {
-    name: 'lector_qr_pro',
+    name: 'lector_qr_ultra',
     match: (text) => /^\.readqr$/i.test(text),
 
     execute: async ({ sock, remitente, msg, quoted, getMediaInfo, downloadContentFromMessage }) => {
@@ -23,29 +23,24 @@ module.exports = {
                 buffer = Buffer.concat([buffer, chunk]);
             }
 
-            // 2. Procesar con Jimp (Corrección de Importación)
-            // Usamos un pequeño truco para que funcione en cualquier versión de Jimp
-            const JimpInstance = Jimp.default || Jimp;
-            const image = await JimpInstance.read(buffer);
-            
-            // Optimizamos para lectura: gris y contraste
-            image.greyscale().contrast(0.2); 
+            // 2. Procesar con SHARP (Más rápido y estable que Jimp)
+            // Convertimos a escala de grises y obtenemos el buffer de píxeles "raw"
+            const { data, info } = await sharp(buffer)
+                .ensureAlpha() // Asegura canal RGBA
+                .greyscale()   // Optimiza para QR
+                .raw()
+                .toBuffer({ resolveWithObject: true });
 
-            // Extraemos los datos de la matriz de píxeles
-            const width = image.bitmap.width;
-            const height = image.bitmap.height;
-            const rgbaData = new Uint8ClampedArray(image.bitmap.data);
-
-            // 3. Usar jsQR
-            const code = jsQR(rgbaData, width, height);
+            // 3. Usar jsQR con los datos de Sharp
+            const code = jsQR(new Uint8ClampedArray(data), info.width, info.height);
 
             if (!code) {
                 return await sock.sendMessage(remitente, { 
-                    text: '❌ *Error:* No se detectó el código QR. Prueba enviando la foto más cerca o con mejor luz.' 
+                    text: '❌ *Error:* No se pudo leer el código QR. Intenta que la imagen no esté borrosa.' 
                 }, { quoted: msg });
             }
 
-            // 4. Resultado
+            // 4. Enviar resultado
             let contenido = code.data;
             let respuesta = `✅ *QR Escaneado:*\n\n${contenido}`;
             
@@ -59,7 +54,7 @@ module.exports = {
             }, { quoted: msg });
 
         } catch (err) {
-            console.error('Error crítico en readqr:', err);
+            console.error('Error en readqr:', err);
             await sock.sendMessage(remitente, { text: `❌ Error: ${err.message}` });
         }
     }
