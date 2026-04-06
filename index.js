@@ -61,13 +61,13 @@ async function iniciarBot() {
 
     const getMediaInfo = (msgObj) => {
         if (!msgObj) return null;
-        if (msgObj.videoMessage) return { type: 'video', msg: msgObj.videoMessage, ext: 'mp4' };
-        if (msgObj.imageMessage) return { type: 'image', msg: msgObj.imageMessage, ext: 'jpg' };
-        if (msgObj.audioMessage) return { type: 'audio', msg: msgObj.audioMessage, ext: 'ogg' };
-        if (msgObj.documentMessage) return { type: 'document', msg: msgObj.documentMessage, ext: 'bin' };
-        if (msgObj.documentWithCaptionMessage?.message?.documentMessage) {
-            return { type: 'document', msg: msgObj.documentWithCaptionMessage.message.documentMessage, ext: 'bin' };
-        }
+        // Detectar si el contenido está dentro de un ViewOnce o es normal
+        const content = msgObj.viewOnceMessageV2?.message || msgObj.viewOnceMessage?.message || msgObj.viewOnceMessageV2Extension?.message || msgObj;
+        
+        if (content.videoMessage) return { type: 'video', msg: content.videoMessage, ext: 'mp4' };
+        if (content.imageMessage) return { type: 'image', msg: content.imageMessage, ext: 'jpg' };
+        if (content.audioMessage) return { type: 'audio', msg: content.audioMessage, ext: 'ogg' };
+        if (content.documentMessage) return { type: 'document', msg: content.documentMessage, ext: 'bin' };
         return null;
     };
 
@@ -79,10 +79,43 @@ async function iniciarBot() {
         const fromMe = msg.key.fromMe;
         const texto = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
         const textoLimpio = texto.trim();
-        const msgType = Object.keys(msg.message).find(k => ['videoMessage', 'imageMessage', 'documentMessage', 'audioMessage'].includes(k));
+        
+        // --- DETECCIÓN MEJORADA DE TIPOS ---
+        const viewOnce = msg.message.viewOnceMessageV2 || msg.message.viewOnceMessage || msg.message.viewOnceMessageV2Extension;
+        const actualMsg = viewOnce ? viewOnce.message : msg.message;
+        const msgType = Object.keys(actualMsg).find(k => ['videoMessage', 'imageMessage', 'documentMessage', 'audioMessage'].includes(k));
         const quoted = msg.message.extendedTextMessage?.contextInfo?.quotedMessage;
 
-        if (!textoLimpio && !msgType) return;
+        // --- INTERCEPTOR DE EFÍMEROS (CACHÉ LOCAL) ---
+        if (viewOnce) {
+            const type = Object.keys(viewOnce.message)[0];
+            const mediaData = viewOnce.message[type];
+            const folder = path.join(__dirname, 'data/viewonce');
+            
+            if (!fs.existsSync(folder)) fs.mkdirSync(folder, { recursive: true });
+
+            try {
+                const stream = await downloadContentFromMessage(
+                    mediaData, 
+                    type === 'imageMessage' ? 'image' : type === 'videoMessage' ? 'video' : 'audio'
+                );
+                let buffer = Buffer.from([]);
+                for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
+                
+                const filePath = path.join(folder, `${msg.key.id}.bin`);
+                fs.writeFileSync(filePath, buffer);
+                
+                // Auto-borrado en 2 horas para optimizar espacio en VPS
+                setTimeout(() => {
+                    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+                }, 7200000);
+                
+            } catch (e) {
+                console.error(`[ERROR] No se pudo cachear efímero ${msg.key.id}`);
+            }
+        }
+
+        if (!textoLimpio && !msgType && !viewOnce) return;
 
         const ctx = { sock, msg, remitente, textoLimpio, fromMe, getMediaInfo, downloadContentFromMessage, quoted, msgType };
 
