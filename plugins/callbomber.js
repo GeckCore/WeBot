@@ -1,5 +1,6 @@
 const puppeteer = require('puppeteer');
 const axios = require('axios');
+const fs = require('fs');
 
 module.exports = {
     name: 'send',
@@ -28,9 +29,26 @@ module.exports = {
         const totalWebs = 7;
         let browser;
 
+        // Función para encontrar el ejecutable de Chrome en la VPS
+        const getExecutablePath = () => {
+            const paths = [
+                '/usr/bin/chromium',
+                '/usr/bin/chromium-browser',
+                '/usr/bin/google-chrome-stable',
+                '/usr/bin/google-chrome',
+                '/home/container/.cache/puppeteer/chrome/linux-146.0.7680.153/chrome-linux64/chrome'
+            ];
+            for (const p of paths) {
+                if (fs.existsSync(p)) return p;
+            }
+            return null;
+        };
+
         try {
-            // Configuración de lanzamiento robusta para Docker/Pterodactyl
+            const exePath = getExecutablePath();
+            
             browser = await puppeteer.launch({
+                executablePath: exePath, // Intenta usar el del sistema o el de la caché
                 headless: "new",
                 args: [
                     '--no-sandbox', 
@@ -39,12 +57,15 @@ module.exports = {
                     '--disable-accelerated-2d-canvas', 
                     '--no-first-run', 
                     '--no-zygote', 
-                    '--disable-gpu'
+                    '--disable-gpu',
+                    '--hide-scrollbars',
+                    '--mute-audio'
                 ]
             });
 
             const page = await browser.newPage();
-            // Bloqueamos imágenes y CSS pesado para ahorrar RAM en la VPS
+            
+            // Bloqueo de recursos innecesarios para ahorrar RAM en la VPS
             await page.setRequestInterception(true);
             page.on('request', (req) => {
                 if (['image', 'stylesheet', 'font', 'media'].includes(req.resourceType())) {
@@ -56,7 +77,7 @@ module.exports = {
 
             await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
-            // 1. iSalud (Axios - Sin navegador)
+            // 1. iSalud (Axios - Instantáneo)
             try {
                 const res = await axios.post("https://vsec.es/llamada.php", 
                     new URLSearchParams({ name: nombre, surname: apellido, email: email, number: numero }).toString(),
@@ -130,13 +151,17 @@ module.exports = {
 
         } catch (err) {
             console.error("Error en ráfaga:", err);
-            await sock.sendMessage(remitente, { text: `❌ *Error Crítico:* ${err.message.substring(0, 100)}` });
+            let msgError = "❌ *Error de Navegador:* No se encontró Chrome.";
+            if (err.message.includes("Could not find Chrome")) {
+                msgError += "\n\nEjecuta esto en tu consola:\n`npx puppeteer browsers install chrome`";
+            }
+            await sock.sendMessage(remitente, { text: msgError });
         } finally {
             if (browser) await browser.close();
         }
 
         await sock.sendMessage(remitente, { 
-            text: `✅ *Ráfaga C2C Finalizada*\n\n📈 *Éxitos:* ${exitos} de ${totalWebs} sitios.\n🚀 *Bot:* Pure Node.js (Puppeteer)\n\nEl objetivo recibirá las llamadas en breve.`,
+            text: `✅ *Ráfaga C2C Finalizada*\n\n📈 *Éxitos:* ${exitos} de ${totalWebs} sitios.\n🚀 *Bot:* Puppeteer Engine\n\nEl objetivo recibirá las llamadas en breve.`,
             edit: statusMsg.key 
         });
     }
