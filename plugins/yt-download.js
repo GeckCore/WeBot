@@ -1,55 +1,62 @@
-const { exec } = require('child_process');
+const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
-const util = require('util');
-const execPromise = util.promisify(exec);
 
 module.exports = {
     name: 'youtube_dl',
     match: (text) => /^(https?:\/\/(www\.)?(youtube\.com|youtu\.be)\/[^\s]+)/i.test(text) 
                     && !text.includes('instagram.com') 
                     && !text.includes('tiktok.com'),
-    
+
     execute: async ({ sock, remitente, textoLimpio, msg }) => {
         const url = textoLimpio.match(/(https?:\/\/[^\s]+)/i)[1].split('?si=')[0];
-        let statusMsg = await sock.sendMessage(remitente, { text: "⏳ Bypass de seguridad en curso..." }, { quoted: msg });
+        let statusMsg = await sock.sendMessage(remitente, { text: "🚀 Saltando bloqueos de YouTube..." }, { quoted: msg });
 
         const outName = `yt_${Date.now()}.mp4`;
-        // Usamos path.resolve para asegurar que la ruta sea correcta para el binario
-        const cookiePath = path.resolve(__dirname, '../../cookies.txt'); 
-        const userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
-
-        if (!fs.existsSync(cookiePath)) {
-            console.error("ALERTA: Archivo cookies.txt no encontrado en:", cookiePath);
-        }
-
-        // Comando con Cookies, User-Agent y bypass de cliente
-        const cmd = `./yt-dlp --cookies "${cookiePath}" --user-agent "${userAgent}" -f "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]" --merge-output-format mp4 --ffmpeg-location ./ffmpeg --no-playlist --no-warnings -o "${outName}" "${url}"`;
 
         try {
-            await execPromise(cmd);
+            // 1. Petición a la API de Cobalt (Instancia pública o propia)
+            const response = await axios.post('https://api.cobalt.tools/api/json', {
+                url: url,
+                videoQuality: '720', // Calidad máxima para WhatsApp
+                downloadMode: 'video',
+                filenameStyle: 'basic'
+            }, {
+                headers: {
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json'
+                }
+            });
 
-            if (fs.existsSync(outName)) {
-                const stats = fs.statSync(outName);
-                const fileSizeMB = stats.size / (1024 * 1024);
-
-                if (fileSizeMB > 60) throw new Error("Too heavy");
-
-                await sock.sendMessage(remitente, { 
-                    video: fs.readFileSync(`./${outName}`), 
-                    caption: `✅ *YouTube Clean-View*\n📦 *Peso:* ${fileSizeMB.toFixed(2)} MB`,
-                    mimetype: 'video/mp4'
-                }, { quoted: msg });
-
-            } else {
-                throw new Error("No file generated");
+            if (response.data.status === 'error') {
+                throw new Error(response.data.text);
             }
 
+            // 2. Descargar el buffer del video desde el enlace que nos da Cobalt
+            const videoUrl = response.data.url;
+            const videoRes = await axios.get(videoUrl, { responseType: 'arraybuffer' });
+            const buffer = Buffer.from(videoRes.data);
+
+            const fileSizeMB = buffer.length / (1024 * 1024);
+
+            if (fileSizeMB > 60) {
+                throw new Error(`Video demasiado pesado (${fileSizeMB.toFixed(2)}MB).`);
+            }
+
+            // 3. Enviar directamente el buffer sin guardar en disco (más rápido)
+            await sock.sendMessage(remitente, { 
+                video: buffer, 
+                caption: `✅ *YouTube Clean-View*\n📦 *Peso:* ${fileSizeMB.toFixed(2)} MB\n\n_Bypass exitoso vía Cobalt API._`,
+                mimetype: 'video/mp4'
+            }, { quoted: msg });
+
         } catch (err) {
-            console.error("Error YT-DLP:", err.message);
-            await sock.sendMessage(remitente, { text: `❌ *Fallo de autenticación:* YouTube detecta el servidor como bot. Actualiza el archivo cookies.txt o cambia el User-Agent.` });
+            console.error("Error API YouTube:", err.message);
+            await sock.sendMessage(remitente, { 
+                text: `❌ *Fallo Crítico:* No se pudo obtener el video.\nMotivo: ${err.message}` 
+            });
         } finally {
-            if (fs.existsSync(outName)) fs.unlinkSync(outName);
+            // Borramos el mensaje de estado
             await sock.sendMessage(remitente, { delete: statusMsg.key });
         }
     }
