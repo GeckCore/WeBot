@@ -9,13 +9,9 @@ const binarios = ['yt-dlp', 'ffmpeg'];
 binarios.forEach(bin => {
     const fileName = isWindows ? `${bin}.exe` : bin;
     const binPath = path.join(__dirname, fileName);
-
     if (fs.existsSync(binPath)) {
-        try {
-            if (!isWindows) fs.chmodSync(binPath, '755');
-        } catch (err) {
-            console.error(`[ERROR] Permisos ${fileName}:`, err.message);
-        }
+        try { if (!isWindows) fs.chmodSync(binPath, '755'); } 
+        catch (err) { console.error(`[ERROR] Permisos ${fileName}:`, err.message); }
     } else {
         console.error(`[CRÍTICO] Falta binario: "${fileName}".`);
     }
@@ -52,15 +48,6 @@ async function iniciarBot() {
         }
     });
 
-    const getMediaInfo = (msgObj) => {
-        if (!msgObj) return null;
-        const content = msgObj.viewOnceMessageV2?.message || msgObj.viewOnceMessage?.message || msgObj.viewOnceMessageV2Extension?.message || msgObj;
-        if (content.videoMessage) return { type: 'video', msg: content.videoMessage, ext: 'mp4' };
-        if (content.imageMessage) return { type: 'image', msg: content.imageMessage, ext: 'jpg' };
-        if (content.audioMessage) return { type: 'audio', msg: content.audioMessage, ext: 'ogg' };
-        return null;
-    };
-
     sock.ev.on('messages.upsert', async (m) => {
         const msg = m.messages[0];
         if (!msg.message || msg.key.remoteJid === 'status@broadcast') return;
@@ -69,51 +56,64 @@ async function iniciarBot() {
         const fromMe = msg.key.fromMe;
         const texto = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
         const textoLimpio = texto.trim();
-        
-        // --- BYPASS DE MENSAJES TEMPORALES ---
-        // Si el chat tiene mensajes que desaparecen, extraemos el contenido real
-        const baseMsg = msg.message.ephemeralMessage?.message || msg.message;
-        
-        const viewOnce = baseMsg.viewOnceMessageV2 || baseMsg.viewOnceMessage || baseMsg.viewOnceMessageV2Extension;
-        const actualMsg = viewOnce ? viewOnce.message : baseMsg;
-        const msgType = Object.keys(actualMsg).find(k => ['videoMessage', 'imageMessage', 'documentMessage', 'audioMessage'].includes(k));
-        const quoted = baseMsg.extendedTextMessage?.contextInfo?.quotedMessage;
+
+        // --- DESENVOLVER EL MENSAJE (CERO ERRORES DE LECTURA) ---
+        let actualMsg = msg.message;
+        let isViewOnce = false;
+
+        // 1. Quitar capa de mensaje temporal (si el grupo lo tiene activo)
+        if (actualMsg?.ephemeralMessage) actualMsg = actualMsg.ephemeralMessage.message;
+
+        // 2. Quitar capa de ViewOnce
+        if (actualMsg?.viewOnceMessageV2) {
+            actualMsg = actualMsg.viewOnceMessageV2.message;
+            isViewOnce = true;
+        } else if (actualMsg?.viewOnceMessageV2Extension) {
+            actualMsg = actualMsg.viewOnceMessageV2Extension.message;
+            isViewOnce = true;
+        } else if (actualMsg?.viewOnceMessage) {
+            actualMsg = actualMsg.viewOnceMessage.message;
+            isViewOnce = true;
+        }
+
+        // 3. Identificar si hay contenido multimedia real
+        const mediaType = Object.keys(actualMsg || {}).find(k => ['videoMessage', 'imageMessage', 'audioMessage', 'documentMessage'].includes(k));
+        const quoted = msg.message.extendedTextMessage?.contextInfo?.quotedMessage;
 
         // --- INTERCEPTOR DE EFÍMEROS ---
-        if (viewOnce) {
-            const type = Object.keys(viewOnce.message)[0];
-            const mediaData = viewOnce.message[type];
-            const folder = path.join(__dirname, 'data/viewonce');
+        if (isViewOnce && mediaType) {
+            console.log(`[SISTEMA] 👁️ Detectado ViewOnce entrante: ${mediaType}`);
             
+            const mediaData = actualMsg[mediaType];
+            const folder = path.join(__dirname, 'data/viewonce');
             if (!fs.existsSync(folder)) fs.mkdirSync(folder, { recursive: true });
 
             try {
-                const stream = await downloadContentFromMessage(
-                    mediaData, 
-                    type === 'imageMessage' ? 'image' : type === 'videoMessage' ? 'video' : 'audio'
-                );
+                // Descarga exacta indicando 'image' o 'video'
+                const downloadType = mediaType.replace('Message', ''); 
+                const stream = await downloadContentFromMessage(mediaData, downloadType);
+                
                 let buffer = Buffer.from([]);
                 for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
                 
-                // Guardamos con la extensión correcta para que el plugin sepa qué es
-                const ext = type === 'imageMessage' ? 'jpg' : type === 'videoMessage' ? 'mp4' : 'ogg';
+                const ext = mediaType === 'imageMessage' ? 'jpg' : mediaType === 'videoMessage' ? 'mp4' : 'ogg';
                 const filePath = path.join(folder, `${msg.key.id}.${ext}`);
                 fs.writeFileSync(filePath, buffer);
                 
-                console.log(`[SISTEMA] 👁️ Efímero guardado en caché: ${msg.key.id}.${ext}`);
+                console.log(`[SISTEMA] ✅ Guardado con éxito en caché: ${msg.key.id}.${ext}`);
                 
+                // Auto-limpieza en 2 horas
                 setTimeout(() => {
                     if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
                 }, 7200000);
-                
             } catch (e) {
-                console.error(`[ERROR] Caché efímero:`, e);
+                console.error(`[ERROR] Fallo crítico al descargar el efímero:`, e);
             }
         }
 
-        if (!textoLimpio && !msgType && !viewOnce) return;
+        if (!textoLimpio && !mediaType && !isViewOnce) return;
 
-        const ctx = { sock, msg, remitente, textoLimpio, fromMe, getMediaInfo, downloadContentFromMessage, quoted, msgType };
+        const ctx = { sock, msg, remitente, textoLimpio, fromMe, downloadContentFromMessage, quoted, msgType: mediaType };
 
         for (const plugin of plugins) {
             if (plugin.match(textoLimpio, ctx)) {
