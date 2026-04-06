@@ -2,23 +2,28 @@ const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
 
 module.exports = {
     name: 'anti_viewonce',
-    // Match: Si respondes "ver" a un mensaje que sea de tipo viewOnce
-    match: (text, ctx) => 
-        /^ver$/i.test(text) && 
-        (ctx.quoted?.viewOnceMessageV2 || ctx.quoted?.viewOnceMessageV2Extension),
+    // Match: Ahora detecta cualquier respuesta 'ver' y luego validamos dentro si es efímero
+    match: (text, ctx) => /^ver$/i.test(text) && ctx.quoted,
     
     execute: async ({ sock, remitente, msg, quoted }) => {
-        // Determinamos si es imagen o video dentro del mensaje efímero
-        const viewOnce = quoted.viewOnceMessageV2?.message || quoted.viewOnceMessageV2Extension?.message;
-        const type = Object.keys(viewOnce)[0]; // imageMessage o videoMessage
-        const mediaMsg = viewOnce[type];
+        // 1. Buscamos el contenido real dentro de las capas de cebolla de WhatsApp
+        const viewOnce = quoted.viewOnceMessage || quoted.viewOnceMessageV2 || quoted.viewOnceMessageV2Extension;
+        
+        if (!viewOnce) {
+            // Si el mensaje citado no es de ver una vez, el bot no hace nada (silencio técnico)
+            return;
+        }
 
-        let statusMsg = await sock.sendMessage(remitente, { text: "🔓 Desbloqueando contenido efímero..." }, { quoted: msg });
+        const actualMsg = viewOnce.message;
+        const type = Object.keys(actualMsg)[0]; // Puede ser 'imageMessage' o 'videoMessage'
+        const mediaData = actualMsg[type];
+
+        let statusMsg = await sock.sendMessage(remitente, { text: "🔓 Extrayendo contenido de la tarea..." }, { quoted: msg });
 
         try {
-            // 1. Descargar el contenido directamente desde los servidores de WA
+            // 2. Descargar el flujo de datos
             const stream = await downloadContentFromMessage(
-                mediaMsg, 
+                mediaData, 
                 type === 'imageMessage' ? 'image' : 'video'
             );
 
@@ -27,31 +32,32 @@ module.exports = {
                 buffer = Buffer.concat([buffer, chunk]);
             }
 
-            // 2. Reenviar según el tipo
-            const caption = `✅ *Contenido desbloqueado*\n_Enviado originalmente por: @${quoted.participant.split('@')[0]}_`;
+            // 3. Preparar el envío
+            const caption = `✅ *Contenido desbloqueado*\n_De: @${quoted.participant ? quoted.participant.split('@')[0] : 'usuario'}_`;
+            const mentions = quoted.participant ? [quoted.participant] : [];
 
             if (type === 'imageMessage') {
                 await sock.sendMessage(remitente, { 
                     image: buffer, 
-                    caption: caption,
-                    mentions: [quoted.participant]
+                    caption, 
+                    mentions 
                 }, { quoted: msg });
-            } else if (type === 'videoMessage') {
+            } else {
                 await sock.sendMessage(remitente, { 
                     video: buffer, 
-                    caption: caption,
-                    mentions: [quoted.participant],
-                    mimetype: 'video/mp4'
+                    caption, 
+                    mimetype: 'video/mp4',
+                    mentions 
                 }, { quoted: msg });
             }
 
-            // Borrar el aviso de carga
+            // Borramos el aviso de carga
             await sock.sendMessage(remitente, { delete: statusMsg.key });
 
         } catch (err) {
-            console.error("Error Anti-ViewOnce:", err);
+            console.error("Error en Anti-ViewOnce:", err);
             await sock.sendMessage(remitente, { 
-                text: "❌ Error: No se pudo recuperar el archivo. Es posible que el bot no tenga acceso al flujo de datos.", 
+                text: "❌ Error: WhatsApp ya ha eliminado el archivo de sus servidores o el enlace ha expirado.", 
                 edit: statusMsg.key 
             });
         }
