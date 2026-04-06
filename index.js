@@ -18,19 +18,33 @@ const pluginsDir = path.join(__dirname, 'plugins');
 if (!fs.existsSync(pluginsDir)) fs.mkdirSync(pluginsDir);
 const plugins = fs.readdirSync(pluginsDir).filter(f => f.endsWith('.js')).map(f => require(path.join(pluginsDir, f)));
 
-// --- CACHÉ LIGERA EN RAM (Reemplazo optimizado del 'Store' de The Mystic) ---
+// Caché en RAM para máximo rendimiento
 global.efimerosCache = new Map();
+
+// Buscador recursivo: Escanea todas las capas del JSON buscando el ViewOnce
+function findViewOnce(obj) {
+    if (!obj || typeof obj !== 'object') return null;
+    if (obj.viewOnceMessage) return obj.viewOnceMessage.message;
+    if (obj.viewOnceMessageV2) return obj.viewOnceMessageV2.message;
+    if (obj.viewOnceMessageV2Extension) return obj.viewOnceMessageV2Extension.message;
+    
+    for (const key in obj) {
+        const result = findViewOnce(obj[key]);
+        if (result) return result;
+    }
+    return null;
+}
 
 async function iniciarBot() {
     const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
     const { version } = await fetchLatestBaileysVersion();
 
     const sock = makeWASocket({
-        version: version || [2, 3000, 1033893291], // Fallback a la versión de Mystic
+        version: version || [2, 3000, 1033893291],
         auth: state, 
         printQRInTerminal: false,
-        // Bypass de User-Agent idéntico a The Mystic para evitar el bloqueo de Meta
-        browser: ['Ubuntu', 'Chrome', '20.0.04'], 
+        // HUELLA DE DISPOSITIVO: Copiada de The Mystic para evitar bloqueo de Meta
+        browser: ['TheMystic-Bot-MD', 'Safari', '2.0.0'], 
         syncFullHistory: false
     });
 
@@ -49,17 +63,20 @@ async function iniciarBot() {
         const texto = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
         const textoLimpio = texto.trim();
 
-        // --- INTERCEPTOR DE CLAVES (MEDIAKEY) ---
-        // Desenvolvemos el mensaje en caso de que el grupo tenga mensajes temporales
-        let baseMsg = msg.message?.ephemeralMessage?.message || msg.message;
-        let viewOnceData = baseMsg?.viewOnceMessageV2 || baseMsg?.viewOnceMessage || baseMsg?.viewOnceMessageV2Extension;
+        // LOGGER ACTIVO: Verás cada mensaje que llegue en tiempo real
+        if (!msg.key.fromMe) {
+            const keys = Object.keys(msg.message).join(', ');
+            console.log(`[LOG] Msj de: ${remitente.split('@')[0]} | Capa externa: ${keys}`);
+        }
+
+        // --- INTERCEPTOR RADAR ---
+        const viewOnceData = findViewOnce(msg.message);
 
         if (viewOnceData) {
-            // Guardamos el objeto interno (que contiene la mediaKey) en la RAM
-            global.efimerosCache.set(msg.key.id, viewOnceData.message);
-            console.log(`[SISTEMA] 👁️ Efímero interceptado y guardado en RAM: ID ${msg.key.id}`);
+            global.efimerosCache.set(msg.key.id, viewOnceData);
+            console.log(`[SISTEMA] 👁️ Efímero interceptado en RAM: ID ${msg.key.id}`);
             
-            // Auto-borrado a las 2 horas para liberar RAM de la VPS
+            // Auto-borrado en 2 horas
             setTimeout(() => {
                 global.efimerosCache.delete(msg.key.id);
             }, 7200000);
