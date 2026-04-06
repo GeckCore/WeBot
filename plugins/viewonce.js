@@ -1,38 +1,25 @@
 const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
 
 module.exports = {
-    name: 'anti_viewonce',
-    // Match: Detecta 'ver' y verifica si hay un mensaje citado (quoted)
-    match: (text, ctx) => /^ver$/i.test(text) && ctx.quoted,
+    name: 'revelar',
+    // Match para los comandos que traía tu código: read, revelar, readvo
+    match: (text, ctx) => /^(readviewonce|read|revelar|readvo|ver)$/i.test(text) && ctx.quoted,
     
     execute: async ({ sock, remitente, msg, quoted }) => {
-        // 1. Extraer el mensaje real del contenedor de "Ver una vez"
-        // WhatsApp lo anida en viewOnceMessageV2 o viewOnceMessageV1
-        const viewOnce = quoted.viewOnceMessageV2?.message || 
-                         quoted.viewOnceMessage?.message || 
-                         quoted.viewOnceMessageV2Extension?.message;
+        // 1. Detectar el contenedor de "Ver una vez" (V1, V2 o Extension)
+        const viewOnce = quoted.viewOnceMessageV2 || quoted.viewOnceMessage || quoted.viewOnceMessageV2Extension;
 
-        if (!viewOnce) {
-            // Si el mensaje citado no es efímero, no hacemos nada para no spamear
-            return;
-        }
+        if (!viewOnce) return; // Si no es efímero, no hace nada.
 
-        // 2. Identificar si es foto o video
-        const type = Object.keys(viewOnce).find(k => k.includes('Message'));
-        const mediaMsg = viewOnce[type];
-
-        if (!mediaMsg) return;
-
-        // Feedback visual en consola para que sepas que el bot lo detectó
-        console.log(`[SISTEMA] Desbloqueando contenido efímero de tipo: ${type}`);
-
-        let statusMsg = await sock.sendMessage(remitente, { text: "🔓 *Desbloqueando archivo de tarea...*" }, { quoted: msg });
+        const actualMsg = viewOnce.message;
+        const type = Object.keys(actualMsg)[0]; // imageMessage, videoMessage o audioMessage
+        const mediaData = actualMsg[type];
 
         try {
-            // 3. Descargar el buffer
+            // 2. Descargar el buffer
             const stream = await downloadContentFromMessage(
-                mediaMsg, 
-                type === 'imageMessage' ? 'image' : 'video'
+                mediaData, 
+                type === 'imageMessage' ? 'image' : type === 'videoMessage' ? 'video' : 'audio'
             );
 
             let buffer = Buffer.from([]);
@@ -40,24 +27,33 @@ module.exports = {
                 buffer = Buffer.concat([buffer, chunk]);
             }
 
-            // 4. Reenviar como mensaje normal
-            const caption = `✅ *Contenido Recuperado*\n_Este archivo ya no es efímero._`;
-
-            if (type === 'imageMessage') {
-                await sock.sendMessage(remitente, { image: buffer, caption }, { quoted: msg });
-            } else if (type === 'videoMessage') {
-                await sock.sendMessage(remitente, { video: buffer, caption, mimetype: 'video/mp4' }, { quoted: msg });
+            // 3. Reenviar según el tipo detectado
+            if (/video/.test(type)) {
+                return await sock.sendMessage(remitente, { 
+                    video: buffer, 
+                    caption: mediaData.caption || '✅ Video revelado',
+                    mimetype: 'video/mp4'
+                }, { quoted: msg });
+            } 
+            
+            if (/image/.test(type)) {
+                return await sock.sendMessage(remitente, { 
+                    image: buffer, 
+                    caption: mediaData.caption || '✅ Imagen revelada'
+                }, { quoted: msg });
             }
 
-            // Limpieza del mensaje de estado
-            await sock.sendMessage(remitente, { delete: statusMsg.key });
+            if (/audio/.test(type)) {
+                return await sock.sendMessage(remitente, { 
+                    audio: buffer, 
+                    ptt: true,
+                    mimetype: 'audio/ogg; codecs=opus'
+                }, { quoted: msg });
+            }
 
-        } catch (err) {
-            console.error("[ERROR] Fallo al recuperar ViewOnce:", err);
-            await sock.sendMessage(remitente, { 
-                text: "❌ *Error:* El archivo ha expirado o WhatsApp lo ha borrado de sus servidores.", 
-                edit: statusMsg.key 
-            });
+        } catch (error) {
+            console.error('Error en revelar:', error);
+            await sock.sendMessage(remitente, { text: '❌ El archivo ya no está disponible en los servidores de WA.' });
         }
     }
 };
