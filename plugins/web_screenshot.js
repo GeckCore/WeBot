@@ -2,44 +2,60 @@ const axios = require('axios');
 
 module.exports = {
     name: 'screenshot',
-    // Match: view https://google.com
     match: (text) => /^view\s+https?:\/\/[^\s]+$/i.test(text),
     
     execute: async ({ sock, remitente, textoLimpio, msg }) => {
         const urlCaptura = textoLimpio.split(/\s+/)[1];
-        
-        let statusMsg = await sock.sendMessage(remitente, { 
-            text: `📸 *Renderizando vista previa vía Google...*\n🔗 ${urlCaptura}\n\n_Espere un momento, Google está analizando la web._` 
-        }, { quoted: msg });
+        let statusMsg = await sock.sendMessage(remitente, { text: `📸 *Iniciando captura multi-motor...*\n🔗 ${urlCaptura}` }, { quoted: msg });
+
+        // Función para intentar con Google PageSpeed
+        const motorGoogle = async (url) => {
+            const res = await axios.get(`https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(url)}&screenshot=true`, { timeout: 20000 });
+            const data = res.data?.lighthouseResult?.audits?.['final-screenshot']?.details?.data;
+            return data ? Buffer.from(data.split(',')[1], 'base64') : null;
+        };
+
+        // Función para intentar con WordPress mShots (Sin API Key)
+        const motorWordPress = async (url) => {
+            const res = await axios.get(`https://s.wordpress.com/mshots/v1/${encodeURIComponent(url)}?w=1280&h=720`, { responseType: 'arraybuffer', timeout: 15000 });
+            // WordPress a veces devuelve una imagen por defecto si está cargando, pero es mejor que nada
+            return res.data;
+        };
+
+        // Función para intentar con la API de Microlink (Muy estable)
+        const motorMicrolink = async (url) => {
+            const res = await axios.get(`https://api.microlink.io/?url=${encodeURIComponent(url)}&screenshot=true&embed=screenshot.url`, { responseType: 'arraybuffer', timeout: 15000 });
+            return res.data;
+        };
 
         try {
-            // Usamos la API de Google PageSpeed Insights (No requiere KEY para uso moderado)
-            // Esta API es la más estable del mundo para esto.
-            const googleApi = `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(urlCaptura)}&screenshot=true`;
-            
-            const response = await axios.get(googleApi, { timeout: 20000 });
-            
-            // Google devuelve la imagen en Base64 dentro de un JSON complejo
-            const base64Data = response.data?.lighthouseResult?.audits?.['final-screenshot']?.details?.data;
+            let buffer;
+            console.log("[INFO] Intentando Motor 1 (Google)...");
+            try {
+                buffer = await motorGoogle(urlCaptura);
+            } catch (e) {
+                console.log("[WARN] Google falló (429 o Timeout). Saltando a Motor 2...");
+                try {
+                    buffer = await motorMicrolink(urlCaptura);
+                } catch (e2) {
+                    console.log("[WARN] Microlink falló. Saltando a Motor 3 (Final)...");
+                    buffer = await motorWordPress(urlCaptura);
+                }
+            }
 
-            if (base64Data) {
-                // Convertir Base64 (que viene como data:image/jpeg;base64,...) a Buffer
-                const buffer = Buffer.from(base64Data.split(',')[1], 'base64');
-
+            if (buffer) {
                 await sock.sendMessage(remitente, { 
                     image: buffer, 
-                    caption: `✅ *Captura de Google Insights*\n🌐 *Web:* ${urlCaptura}` 
+                    caption: `✅ *Captura exitosa*\n🌐 ${urlCaptura}` 
                 }, { quoted: msg });
-
                 await sock.sendMessage(remitente, { delete: statusMsg.key });
             } else {
-                throw new Error("Google no pudo generar la captura.");
+                throw new Error("No se pudo obtener imagen de ningún motor.");
             }
 
         } catch (err) {
-            console.error("Error Screenshot Google:", err.message);
             await sock.sendMessage(remitente, { 
-                text: `❌ *Error de Renderizado*\n\nLa web es privada, requiere login o Google no tiene acceso a ella.`, 
+                text: `❌ *Error Crítico:* Todos los motores de renderizado están saturados o la web bloquea el acceso.`, 
                 edit: statusMsg.key 
             });
         }
