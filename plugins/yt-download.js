@@ -15,7 +15,7 @@ module.exports = {
         let statusMsg = await sock.sendMessage(remitente, { text: "⏳ Procesando video con bypass..." }, { quoted: msg });
 
         const outName = `yt_${Date.now()}.mp4`;
-        const cookiePath = './youtube_cookies.txt'; // Asegúrate de subir este archivo a tu servidor
+        const cookiePath = './cookies.txt'; // Asegúrate de subir este archivo a tu servidor
         
         // Verificamos si existen cookies para usar el parámetro o no
         const cookieArg = fs.existsSync(cookiePath) ? `--cookies ${cookiePath}` : '';
