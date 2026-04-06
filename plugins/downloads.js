@@ -1,96 +1,75 @@
-const fs = require('fs');
-const path = require('path');
-const { exec } = require('child_process');
 const axios = require('axios');
-const util = require('util');
-const execPromise = util.promisify(exec);
 
 module.exports = {
     name: 'downloads',
-    // Mantenemos el match original pero aseguramos que sea un link
-    match: (text) => /^(https?:\/\/[^\s]+)$/i.test(text) && !text.toLowerCase().includes('resume'),
-    
+    match: (text) => /^(https?:\/\/(www\.)?(tiktok\.com|vt\.tiktok\.com|vm\.tiktok\.com|instagram\.com|ig\.me).*)/i.test(text),
     execute: async ({ sock, remitente, textoLimpio, msg }) => {
-        const urlMatch = textoLimpio.match(/^(https?:\/\/[^\s]+)$/i);
-        if (!urlMatch) return;
-        
-        let urlLimpia = urlMatch[1].split(/[?&]si=/)[0].split(/[&?]feature=/)[0];
+        const rawUrl = textoLimpio.match(/(https?:\/\/[^\s]+)/i)[1];
+        const cleanUrl = rawUrl.split('?')[0]; 
+        let statusMsg = await sock.sendMessage(remitente, { text: "⏳ Procesando enlace..." }, { quoted: msg });
 
-        // --- LÓGICA 1: TIKTOK E INSTAGRAM (TU CÓDIGO ORIGINAL QUE FUNCIONA) ---
-        if (urlLimpia.includes('tiktok.com') || urlLimpia.includes('instagram.com') || urlLimpia.includes('ig.me')) {
-            // Aquí no tocamos nada, el bot ejecutará la lógica de APIs que ya tienes configurada.
-            // (Si tenías el código de las APIs de TikWM/Delirius en este archivo, debe ir aquí)
-            // Por brevedad, asumo que quieres integrar YouTube en la estructura que pasaste:
-        }
+        try {
+            // --- LÓGICA TIKTOK (TikWM) ---
+            if (cleanUrl.includes('tiktok.com')) {
+                const res = await axios.get(`https://tikwm.com/api/?url=${encodeURIComponent(cleanUrl)}&hd=1`);
+                const data = res.data?.data;
 
-        // --- LÓGICA 2: YOUTUBE (MOTOR LOCAL YT-DLP) ---
-        if (urlLimpia.includes('youtube.com') || urlLimpia.includes('youtu.be')) {
-            let statusMsg = await sock.sendMessage(remitente, { text: "⏳ Extrayendo video de YouTube (Sin anuncios)..." }, { quoted: msg });
+                if (!data) throw new Error("No se pudo obtener el contenido de TikTok.");
 
-            const isAudio = urlLimpia.includes('music.youtube.com');
-            const outName = path.join(__dirname, `../dl_${Date.now()}`);
-            const ext = isAudio ? 'wav' : 'mp4';
-            
-            const ytDlpPath = path.join(__dirname, '../yt-dlp');
-            const ffmpegPath = path.join(__dirname, '../ffmpeg');
-            const ytCookies = path.join(__dirname, '../youtube_cookies.txt');
+                await sock.sendMessage(remitente, { text: "🚀 Enviando TikTok...", edit: statusMsg.key });
 
-            let cookieArg = "";
-            if (fs.existsSync(ytCookies)) cookieArg = `--cookies "${ytCookies}"`;
-
-            // Formato corregido para evitar el "format not available"
-            const format = isAudio 
-                ? `-f "bestaudio/best" -x --audio-format wav` 
-                : `-f "bestvideo[height<=720]+bestaudio/best[ext=m4a]/best[height<=720]/best" --merge-output-format mp4`;
-
-            const cmdBase = `${ytDlpPath} ${cookieArg} --ffmpeg-location "${ffmpegPath}" --no-playlist --no-warnings --geo-bypass -o "${outName}.%(ext)s" ${format}`;
-
-            const attempts = [
-                `${cmdBase} --extractor-args "youtube:player_client=android" "${urlLimpia}"`,
-                `${cmdBase} "${urlLimpia}"`
-            ];
-
-            let success = false;
-            let lastError = "";
-
-            for (const cmd of attempts) {
-                try {
-                    await execPromise(cmd);
-                    if (fs.existsSync(`${outName}.${ext}`)) {
-                        success = true;
-                        break;
+                if (data.images && data.images.length > 0) {
+                    for (const img of data.images) {
+                        await sock.sendMessage(remitente, { image: { url: img } });
                     }
-                } catch (e) {
-                    lastError = e.stderr || e.message;
+                } else {
+                    const videoUrl = data.hdplay || data.play;
+                    await sock.sendMessage(remitente, { video: { url: videoUrl }, mimetype: 'video/mp4' }, { quoted: msg });
                 }
+                return await sock.sendMessage(remitente, { delete: statusMsg.key });
             }
 
-            if (!success) {
-                return sock.sendMessage(remitente, { text: `❌ Error en YouTube:\n${lastError.substring(0, 100)}`, edit: statusMsg.key });
+            // --- LÓGICA INSTAGRAM (Cascada de APIs) ---
+            if (cleanUrl.includes('instagram.com') || cleanUrl.includes('ig.me')) {
+                const encodedUrl = encodeURIComponent(cleanUrl);
+                let mediaList = [];
+
+                const igApis = [
+                    async () => (await axios.get(`https://deliriussapi-oficial.vercel.app/download/instagram?url=${encodedUrl}`)).data?.data,
+                    async () => (await axios.get(`https://api.siputzx.my.id/api/d/igdl?url=${encodedUrl}`)).data?.data,
+                    async () => (await axios.get(`https://api.vreden.web.id/api/igdl?url=${encodedUrl}`)).data?.result
+                ];
+
+                for (const fetchApi of igApis) {
+                    try {
+                        const result = await fetchApi();
+                        if (result && Array.isArray(result) && result.length > 0) {
+                            mediaList = result;
+                            break;
+                        } else if (result && result.url) {
+                            mediaList = [result];
+                            break;
+                        }
+                    } catch (e) { continue; }
+                }
+
+                if (mediaList.length === 0) throw new Error("Servidores de Instagram saturados.");
+
+                await sock.sendMessage(remitente, { text: "🚀 Enviando Instagram...", edit: statusMsg.key });
+
+                for (const item of mediaList) {
+                    const dlUrl = item.url || item;
+                    if (dlUrl.includes('.mp4') || dlUrl.includes('video') || item.type === 'video') {
+                        await sock.sendMessage(remitente, { video: { url: dlUrl }, mimetype: 'video/mp4' });
+                    } else {
+                        await sock.sendMessage(remitente, { image: { url: dlUrl } });
+                    }
+                }
+                return await sock.sendMessage(remitente, { delete: statusMsg.key });
             }
 
-            const finalFile = `${outName}.${ext}`;
-            const stats = fs.statSync(finalFile);
-            const fileSizeMB = stats.size / (1024 * 1024);
-
-            if (fileSizeMB > 60) { // Límite de 60MB para evitar lag
-                if (fs.existsSync(finalFile)) fs.unlinkSync(finalFile);
-                return sock.sendMessage(remitente, { text: `⚠️ Video demasiado pesado (${fileSizeMB.toFixed(1)}MB).`, edit: statusMsg.key });
-            }
-
-            try {
-                const payload = isAudio 
-                    ? { document: { url: finalFile }, mimetype: 'audio/wav', fileName: `Audio.wav` } 
-                    : { video: { url: finalFile }, mimetype: 'video/mp4', caption: "✅ YouTube Clean-View" };
-
-                await sock.sendMessage(remitente, payload, { quoted: msg });
-                await sock.sendMessage(remitente, { delete: statusMsg.key });
-            } catch (err) {
-                await sock.sendMessage(remitente, { text: "❌ Error al enviar el archivo.", edit: statusMsg.key });
-            } finally {
-                if (fs.existsSync(finalFile)) fs.unlinkSync(finalFile);
-            }
-            return; // Finalizamos ejecución para que no choque con otros procesos
+        } catch (error) {
+            return sock.sendMessage(remitente, { text: `❌ Error: ${error.message}`, edit: statusMsg.key });
         }
     }
 };
