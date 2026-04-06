@@ -1,64 +1,63 @@
 const Jimp = require('jimp');
-const QrCodeReader = require('qrcode-reader');
+const jsQR = require('jsqr');
 
 module.exports = {
-    name: 'lector_qr_avanzado',
-    // Match para el comando .readqr
+    name: 'lector_qr_pro',
     match: (text) => /^\.readqr$/i.test(text),
 
     execute: async ({ sock, remitente, msg, quoted, getMediaInfo, downloadContentFromMessage }) => {
         
-        // 1. Verificación: ¿Estamos respondiendo a una imagen?
         const media = getMediaInfo(quoted);
 
         if (!quoted || !media || (media.type !== 'image' && media.type !== 'sticker')) {
             return await sock.sendMessage(remitente, { 
-                text: '⚠️ *Error:* Debes responder a una **imagen** o **sticker** que contenga un código QR usando el comando `.readqr`.' 
+                text: '⚠️ *Responde a una imagen o sticker con .readqr*' 
             }, { quoted: msg });
         }
 
-        await sock.sendMessage(remitente, { text: '🔍 *Escaneando código QR...*' }, { quoted: msg });
-
         try {
-            // 2. Descargar el contenido multimedia de la VPS a la RAM
+            // 1. Descargar multimedia a RAM
             const stream = await downloadContentFromMessage(media.msg, media.type === 'image' ? 'image' : 'sticker');
             let buffer = Buffer.from([]);
             for await (const chunk of stream) {
                 buffer = Buffer.concat([buffer, chunk]);
             }
 
-            // 3. Procesamiento de imagen con Jimp
+            // 2. Procesar con Jimp para obtener datos de píxeles puros (RGBA)
             const image = await Jimp.read(buffer);
-            const qr = new QrCodeReader();
-
-            // 4. Decodificación del QR
-            const resultado = await new Promise((resolve, reject) => {
-                qr.callback = (err, value) => {
-                    if (err) return reject(new Error('No se encontró un QR legible.'));
-                    if (!value) return reject(new Error('El QR está vacío o dañado.'));
-                    resolve(value.result);
-                };
-                qr.decode(image.bitmap);
-            });
-
-            // 5. Respuesta inteligente según el contenido
-            let respuestaFinal = `✅ *Resultado del escaneo:*\n\n${resultado}`;
             
-            // Si es un enlace, intentamos que WhatsApp genere una vista previa (opcional)
-            if (resultado.startsWith('http')) {
-                respuestaFinal = `🔗 *Enlace detectado:*\n${resultado}`;
+            // Optimizamos la imagen para el lector: escala de grises y contraste
+            image.greyscale().contrast(0.2); 
+
+            const width = image.bitmap.width;
+            const height = image.bitmap.height;
+            const rgbaData = image.bitmap.data;
+
+            // 3. Usar jsQR (Motor mucho más preciso que el anterior)
+            const code = jsQR(rgbaData, width, height);
+
+            if (!code) {
+                return await sock.sendMessage(remitente, { 
+                    text: '❌ *Error:* No se detectó el código QR. Intenta enviar la foto con mejor iluminación o menos ángulo.' 
+                }, { quoted: msg });
+            }
+
+            // 4. Enviar resultado
+            let contenido = code.data;
+            let respuesta = `✅ *QR Escaneado:*\n\n${contenido}`;
+            
+            if (contenido.startsWith('http')) {
+                respuesta = `🔗 *Enlace encontrado:*\n${contenido}`;
             }
 
             await sock.sendMessage(remitente, { 
-                text: respuestaFinal,
+                text: respuesta,
                 detectLinks: true 
             }, { quoted: msg });
 
         } catch (err) {
-            console.error('Error al leer QR:', err.message);
-            await sock.sendMessage(remitente, { 
-                text: `❌ *Error:* No pude leer el código QR. Asegúrate de que la imagen sea nítida y el QR esté centrado.` 
-            }, { quoted: msg });
+            console.error('Error crítico en readqr:', err);
+            await sock.sendMessage(remitente, { text: '❌ Error técnico al procesar la imagen.' });
         }
     }
 };
