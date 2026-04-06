@@ -1,45 +1,52 @@
-const fs = require('fs');
-const path = require('path');
-
 module.exports = {
-    name: 'ver_efimero',
-    match: (text, ctx) => /^ver$/i.test(text) && ctx.msg.message.extendedTextMessage?.contextInfo?.stanzaId,
+    name: 'revelar',
+    // Match para los comandos: read, revelar, ver
+    match: (text, ctx) => /^(read|revelar|ver|readvo)$/i.test(text) && ctx.isViewOnce,
     
-    execute: async ({ sock, remitente, msg }) => {
-        const quotedId = msg.message.extendedTextMessage.contextInfo.stanzaId;
-        const folder = path.join(__dirname, '../data/viewonce');
-
-        if (!fs.existsSync(folder)) {
-            return sock.sendMessage(remitente, { text: "❌ El directorio de caché no existe." }, { quoted: msg });
-        }
-
-        // Buscar el archivo que contenga el ID (ya sea .jpg o .mp4)
-        const files = fs.readdirSync(folder);
-        const targetFile = files.find(f => f.includes(quotedId));
-
-        if (!targetFile) {
-            return sock.sendMessage(remitente, { text: "❌ *Error:* El archivo no está en caché (caducó o el bot no lo registró)." }, { quoted: msg });
-        }
-
-        const filePath = path.join(folder, targetFile);
-        const buffer = fs.readFileSync(filePath);
+    execute: async ({ sock, remitente, msg, quoted, downloadContentFromMessage }) => {
+        // 'quoted' aquí ya es el mensaje interno (imageMessage o videoMessage) gracias al index.js
+        const type = Object.keys(quoted)[0]; 
+        const mediaData = quoted[type];
 
         try {
-            if (targetFile.endsWith('.mp4')) {
-                await sock.sendMessage(remitente, { 
+            // Descargamos el buffer (exactamente como en The Mystic)
+            const stream = await downloadContentFromMessage(
+                mediaData, 
+                type === 'imageMessage' ? 'image' : type === 'videoMessage' ? 'video' : 'audio'
+            );
+
+            let buffer = Buffer.from([]);
+            for await (const chunk of stream) {
+                buffer = Buffer.concat([buffer, chunk]);
+            }
+
+            if (/video/.test(type)) {
+                return await sock.sendMessage(remitente, { 
                     video: buffer, 
-                    caption: "✅ *Video efímero recuperado.*",
+                    caption: mediaData.caption || '',
                     mimetype: 'video/mp4'
                 }, { quoted: msg });
-            } else {
-                await sock.sendMessage(remitente, { 
+            } 
+            
+            if (/image/.test(type)) {
+                return await sock.sendMessage(remitente, { 
                     image: buffer, 
-                    caption: "✅ *Imagen efímera recuperada.*" 
+                    caption: mediaData.caption || '',
+                    mimetype: 'image/jpeg'
                 }, { quoted: msg });
             }
-        } catch (err) {
-            console.error("Error enviando caché:", err);
-            await sock.sendMessage(remitente, { text: "❌ Archivo dañado o error de lectura." });
+
+            if (/audio/.test(type)) {
+                return await sock.sendMessage(remitente, { 
+                    audio: buffer, 
+                    ptt: true,
+                    mimetype: 'audio/ogg; codecs=opus'
+                }, { quoted: msg });
+            }
+
+        } catch (error) {
+            console.error('Error al revelar:', error);
+            await sock.sendMessage(remitente, { text: '❌ Error: No se pudo descargar. El archivo ya fue abierto o expiró.' });
         }
     }
 };
