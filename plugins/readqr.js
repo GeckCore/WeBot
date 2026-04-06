@@ -23,26 +23,29 @@ module.exports = {
                 buffer = Buffer.concat([buffer, chunk]);
             }
 
-            // 2. Procesar con Jimp para obtener datos de píxeles puros (RGBA)
-            const image = await Jimp.read(buffer);
+            // 2. Procesar con Jimp (Corrección de Importación)
+            // Usamos un pequeño truco para que funcione en cualquier versión de Jimp
+            const JimpInstance = Jimp.default || Jimp;
+            const image = await JimpInstance.read(buffer);
             
-            // Optimizamos la imagen para el lector: escala de grises y contraste
+            // Optimizamos para lectura: gris y contraste
             image.greyscale().contrast(0.2); 
 
+            // Extraemos los datos de la matriz de píxeles
             const width = image.bitmap.width;
             const height = image.bitmap.height;
-            const rgbaData = image.bitmap.data;
+            const rgbaData = new Uint8ClampedArray(image.bitmap.data);
 
-            // 3. Usar jsQR (Motor mucho más preciso que el anterior)
+            // 3. Usar jsQR
             const code = jsQR(rgbaData, width, height);
 
             if (!code) {
                 return await sock.sendMessage(remitente, { 
-                    text: '❌ *Error:* No se detectó el código QR. Intenta enviar la foto con mejor iluminación o menos ángulo.' 
+                    text: '❌ *Error:* No se detectó el código QR. Prueba enviando la foto más cerca o con mejor luz.' 
                 }, { quoted: msg });
             }
 
-            // 4. Enviar resultado
+            // 4. Resultado
             let contenido = code.data;
             let respuesta = `✅ *QR Escaneado:*\n\n${contenido}`;
             
@@ -57,7 +60,7 @@ module.exports = {
 
         } catch (err) {
             console.error('Error crítico en readqr:', err);
-            await sock.sendMessage(remitente, { text: '❌ Error técnico al procesar la imagen.' });
+            await sock.sendMessage(remitente, { text: `❌ Error: ${err.message}` });
         }
     }
 };
