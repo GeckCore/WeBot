@@ -1,62 +1,80 @@
 const axios = require('axios');
+const fs = require('fs');
+const path = require('path');
+
+// Función para convertir el archivo .txt de cookies a un String útil
+function parseCookies() {
+    const cookiePath = path.join(__dirname, '../instagram_cookies.txt');
+    if (!fs.existsSync(cookiePath)) return null;
+
+    const content = fs.readFileSync(cookiePath, 'utf8');
+    return content.split('\n')
+        .filter(line => line && !line.startsWith('#'))
+        .map(line => {
+            const parts = line.split('\t');
+            return `${parts[5]}=${parts[6]}`;
+        }).join('; ');
+}
 
 module.exports = {
-    name: 'igstalk_v3',
+    name: 'igstalk_cookies',
     match: (text) => /^(\.)?(igstalk|ig)\s+.+$/i.test(text),
 
     execute: async ({ sock, remitente, msg, textoLimpio }) => {
-        const args = textoLimpio.split(/\s+/);
-        const user = args[1].replace(/^@/, '');
-        
-        console.log(`[STALK] Consultando a: ${user}`);
-        await sock.sendMessage(remitente, { text: `🔍 Consultando base de datos para *@${user}*...` }, { quoted: msg });
+        const user = textoLimpio.split(/\s+/)[1].replace(/^@/, '');
+        const cookies = parseCookies();
 
-    try {
-        // Usamos un endpoint de API alternativo que suele saltarse los bloqueos de VPS
-        const res = await axios.get(`https://api.screenshotlayer.com/php_helper_ig.php?u=${user}`, {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36'
-            },
-            timeout: 10000 
-        });
-
-        const data = res.data;
-
-        if (!data || !data.username) {
-            throw new Error('NOT_FOUND');
+        if (!cookies) {
+            return await sock.sendMessage(remitente, { text: '❌ Error: No encontré el archivo `instagram_cookies.txt` en la raíz.' });
         }
 
-        const informe = `👤 *PERFIL DE INSTAGRAM*\n\n` +
-            `✨ *Nombre:* ${data.full_name || data.username}\n` +
-            `🆔 *User:* @${data.username}\n` +
-            `📝 *Bio:* ${data.biography || 'Sin bio.'}\n\n` +
-            `📊 *ESTADÍSTICAS*\n` +
-            `🔹 *Seguidores:* ${formatNumber(data.follower_count)}\n` +
-            `🔸 *Seguidos:* ${formatNumber(data.following_count)}\n` +
-            `🖼️ *Posts:* ${data.media_count}\n\n` +
-            `🔗 *Link:* https://instagram.com/${data.username}`;
+        await sock.sendMessage(remitente, { text: `🔍 Stalking con sesión activa para *@${user}*...` }, { quoted: msg });
 
-        await sock.sendMessage(remitente, { 
-            image: { url: data.profile_pic_url_hd || data.profile_pic_url }, 
-            caption: informe 
-        }, { quoted: msg });
+        try {
+            // Atacamos el endpoint oficial de perfil web
+            const response = await axios.get(`https://www.instagram.com/api/v1/users/web_profile_info/?username=${user}`, {
+                headers: {
+                    'Cookie': cookies,
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'x-ig-app-id': '936619743392459', // ID estándar de la App Web de IG
+                    'Sec-Fetch-Dest': 'empty',
+                    'Sec-Fetch-Mode': 'cors',
+                    'Sec-Fetch-Site': 'same-origin'
+                }
+            });
 
-    } catch (e) {
-        console.error(`[IG-ERROR] Falló el stalk: ${e.message}`);
-        
-        let errorMsg = '❌ *Error:* El servidor de Instagram bloqueó la petición.';
-        if (e.message === 'NOT_FOUND') errorMsg = '❌ *Error:* Perfil no encontrado o cuenta privada.';
-        if (e.code === 'ECONNABORTED') errorMsg = '❌ *Error:* Tiempo de espera agotado (VPS lenta).';
+            const data = response.data.data.user;
 
-        await sock.sendMessage(remitente, { text: errorMsg }, { quoted: msg });
+            if (!data) throw new Error('PRIVATE_OR_NOT_FOUND');
+
+            const informe = `👤 *PERFIL DE INSTAGRAM (LOGGED IN)*\n\n` +
+                `✨ *Nombre:* ${data.full_name}\n` +
+                `🆔 *User:* @${data.username} ${data.is_verified ? '✅' : ''}\n` +
+                `📝 *Bio:* ${data.biography || 'Sin bio'}\n` +
+                `🔗 *Web:* ${data.external_url || 'No tiene'}\n\n` +
+                `📊 *ESTADÍSTICAS*\n` +
+                `🔹 *Seguidores:* ${formatNumber(data.edge_followed_by.count)}\n` +
+                `🔸 *Seguidos:* ${formatNumber(data.edge_follow.count)}\n` +
+                `🖼️ *Posts:* ${data.edge_owner_to_timeline_media.count}\n\n` +
+                `🔐 *Privado:* ${data.is_private ? 'Sí' : 'No'}`;
+
+            await sock.sendMessage(remitente, { 
+                image: { url: data.profile_pic_url_hd }, 
+                caption: informe 
+            }, { quoted: msg });
+
+        } catch (e) {
+            console.error('[IG-COOKIES-ERROR]', e.response?.data || e.message);
+            let errText = '❌ Error al obtener datos. Las cookies podrían haber expirado.';
+            if (e.message === 'PRIVATE_OR_NOT_FOUND') errText = '❌ Perfil no encontrado o cuenta privada.';
+            
+            await sock.sendMessage(remitente, { text: errText }, { quoted: msg });
+        }
     }
-}
 };
 
-// Función para poner K o M en los números (Ej: 10.5K)
 function formatNumber(num) {
-    if (!num) return '0';
     if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
     if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
-    return num.toString();
+    return num;
 }
