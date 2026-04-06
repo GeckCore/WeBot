@@ -12,16 +12,19 @@ module.exports = {
     
     execute: async ({ sock, remitente, textoLimpio, msg }) => {
         const url = textoLimpio.match(/(https?:\/\/[^\s]+)/i)[1].split('?si=')[0];
-        let statusMsg = await sock.sendMessage(remitente, { text: "⏳ Procesando video con bypass..." }, { quoted: msg });
+        let statusMsg = await sock.sendMessage(remitente, { text: "⏳ Bypass de seguridad en curso..." }, { quoted: msg });
 
         const outName = `yt_${Date.now()}.mp4`;
-        const cookiePath = './cookies.txt'; // Asegúrate de subir este archivo a tu servidor
-        
-        // Verificamos si existen cookies para usar el parámetro o no
-        const cookieArg = fs.existsSync(cookiePath) ? `--cookies ${cookiePath}` : '';
+        // Usamos path.resolve para asegurar que la ruta sea correcta para el binario
+        const cookiePath = path.resolve(__dirname, '../../cookies.txt'); 
+        const userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
-        // Comando actualizado con cookies y manejo de errores de bot
-        const cmd = `./yt-dlp ${cookieArg} -f "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]" --merge-output-format mp4 --ffmpeg-location ./ffmpeg --no-playlist --no-warnings -o "${outName}" "${url}"`;
+        if (!fs.existsSync(cookiePath)) {
+            console.error("ALERTA: Archivo cookies.txt no encontrado en:", cookiePath);
+        }
+
+        // Comando con Cookies, User-Agent y bypass de cliente
+        const cmd = `./yt-dlp --cookies "${cookiePath}" --user-agent "${userAgent}" -f "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]" --merge-output-format mp4 --ffmpeg-location ./ffmpeg --no-playlist --no-warnings -o "${outName}" "${url}"`;
 
         try {
             await execPromise(cmd);
@@ -30,9 +33,7 @@ module.exports = {
                 const stats = fs.statSync(outName);
                 const fileSizeMB = stats.size / (1024 * 1024);
 
-                if (fileSizeMB > 60) {
-                    throw new Error(`Video demasiado pesado (${fileSizeMB.toFixed(2)}MB).`);
-                }
+                if (fileSizeMB > 60) throw new Error("Too heavy");
 
                 await sock.sendMessage(remitente, { 
                     video: fs.readFileSync(`./${outName}`), 
@@ -41,15 +42,12 @@ module.exports = {
                 }, { quoted: msg });
 
             } else {
-                throw new Error("No se generó el archivo de salida.");
+                throw new Error("No file generated");
             }
 
         } catch (err) {
             console.error("Error YT-DLP:", err.message);
-            let errorMsg = "❌ *Error:* YouTube ha bloqueado la conexión. Se requiere actualizar las cookies.";
-            if (err.message.includes("heavy")) errorMsg = "❌ El video supera los 60MB.";
-            
-            await sock.sendMessage(remitente, { text: errorMsg });
+            await sock.sendMessage(remitente, { text: `❌ *Fallo de autenticación:* YouTube detecta el servidor como bot. Actualiza el archivo cookies.txt o cambia el User-Agent.` });
         } finally {
             if (fs.existsSync(outName)) fs.unlinkSync(outName);
             await sock.sendMessage(remitente, { delete: statusMsg.key });
