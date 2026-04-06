@@ -3,7 +3,6 @@ const qrcode = require('qrcode-terminal');
 const fs = require('fs');
 const path = require('path');
 
-// --- OPTIMIZACIÓN DE ARRANQUE: PERMISOS Y VERIFICACIÓN DE BINARIOS ---
 const isWindows = process.platform === 'win32';
 const binarios = ['yt-dlp', 'ffmpeg'];
 
@@ -13,21 +12,15 @@ binarios.forEach(bin => {
 
     if (fs.existsSync(binPath)) {
         try {
-            if (!isWindows) {
-                fs.chmodSync(binPath, '755');
-                console.log(`[INFO] Permisos de ${fileName} configurados (chmod +x).`);
-            } else {
-                console.log(`[INFO] Binario ${fileName} detectado en Windows.`);
-            }
+            if (!isWindows) fs.chmodSync(binPath, '755');
         } catch (err) {
-            console.error(`[ERROR] No se pudieron aplicar permisos a ${fileName}:`, err.message);
+            console.error(`[ERROR] Permisos ${fileName}:`, err.message);
         }
     } else {
-        console.error(`[CRÍTICO] Falta el binario: "${fileName}" en la raíz (${__dirname}). El bot tendrá funciones limitadas.`);
+        console.error(`[CRÍTICO] Falta binario: "${fileName}".`);
     }
 });
 
-// Cargar plugins dinámicamente
 const pluginsDir = path.join(__dirname, 'plugins');
 if (!fs.existsSync(pluginsDir)) fs.mkdirSync(pluginsDir);
 const plugins = fs.readdirSync(pluginsDir)
@@ -52,22 +45,19 @@ async function iniciarBot() {
         const { connection, qr } = update;
         if (qr) qrcode.generate(qr, { small: true });
         if (connection === 'close') {
-            console.log('[INFO] Conexión cerrada. Reconectando...');
+            console.log('[INFO] Reconectando...');
             iniciarBot();
         } else if (connection === 'open') {
-            console.log(`[INFO] ¡Conectado a WhatsApp! (${plugins.length} plugins cargados)`);
+            console.log(`[INFO] ¡Conectado! (${plugins.length} plugins cargados)`);
         }
     });
 
     const getMediaInfo = (msgObj) => {
         if (!msgObj) return null;
-        // Detectar si el contenido está dentro de un ViewOnce o es normal
         const content = msgObj.viewOnceMessageV2?.message || msgObj.viewOnceMessage?.message || msgObj.viewOnceMessageV2Extension?.message || msgObj;
-        
         if (content.videoMessage) return { type: 'video', msg: content.videoMessage, ext: 'mp4' };
         if (content.imageMessage) return { type: 'image', msg: content.imageMessage, ext: 'jpg' };
         if (content.audioMessage) return { type: 'audio', msg: content.audioMessage, ext: 'ogg' };
-        if (content.documentMessage) return { type: 'document', msg: content.documentMessage, ext: 'bin' };
         return null;
     };
 
@@ -80,13 +70,16 @@ async function iniciarBot() {
         const texto = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
         const textoLimpio = texto.trim();
         
-        // --- DETECCIÓN MEJORADA DE TIPOS ---
-        const viewOnce = msg.message.viewOnceMessageV2 || msg.message.viewOnceMessage || msg.message.viewOnceMessageV2Extension;
-        const actualMsg = viewOnce ? viewOnce.message : msg.message;
+        // --- BYPASS DE MENSAJES TEMPORALES ---
+        // Si el chat tiene mensajes que desaparecen, extraemos el contenido real
+        const baseMsg = msg.message.ephemeralMessage?.message || msg.message;
+        
+        const viewOnce = baseMsg.viewOnceMessageV2 || baseMsg.viewOnceMessage || baseMsg.viewOnceMessageV2Extension;
+        const actualMsg = viewOnce ? viewOnce.message : baseMsg;
         const msgType = Object.keys(actualMsg).find(k => ['videoMessage', 'imageMessage', 'documentMessage', 'audioMessage'].includes(k));
-        const quoted = msg.message.extendedTextMessage?.contextInfo?.quotedMessage;
+        const quoted = baseMsg.extendedTextMessage?.contextInfo?.quotedMessage;
 
-        // --- INTERCEPTOR DE EFÍMEROS (CACHÉ LOCAL) ---
+        // --- INTERCEPTOR DE EFÍMEROS ---
         if (viewOnce) {
             const type = Object.keys(viewOnce.message)[0];
             const mediaData = viewOnce.message[type];
@@ -102,16 +95,19 @@ async function iniciarBot() {
                 let buffer = Buffer.from([]);
                 for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
                 
-                const filePath = path.join(folder, `${msg.key.id}.bin`);
+                // Guardamos con la extensión correcta para que el plugin sepa qué es
+                const ext = type === 'imageMessage' ? 'jpg' : type === 'videoMessage' ? 'mp4' : 'ogg';
+                const filePath = path.join(folder, `${msg.key.id}.${ext}`);
                 fs.writeFileSync(filePath, buffer);
                 
-                // Auto-borrado en 2 horas para optimizar espacio en VPS
+                console.log(`[SISTEMA] 👁️ Efímero guardado en caché: ${msg.key.id}.${ext}`);
+                
                 setTimeout(() => {
                     if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
                 }, 7200000);
                 
             } catch (e) {
-                console.error(`[ERROR] No se pudo cachear efímero ${msg.key.id}`);
+                console.error(`[ERROR] Caché efímero:`, e);
             }
         }
 
@@ -124,8 +120,7 @@ async function iniciarBot() {
                 try {
                     await plugin.execute(ctx);
                 } catch (err) {
-                    console.error(`Error en plugin ${plugin.name}:`, err);
-                    await sock.sendMessage(remitente, { text: `❌ Error interno (${plugin.name}): ${err.message}` });
+                    console.error(`Error en ${plugin.name}:`, err);
                 }
                 break;
             }
