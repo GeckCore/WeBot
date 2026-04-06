@@ -1,33 +1,59 @@
-const fs = require('fs');
-const path = require('path');
+const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
 
 module.exports = {
-    name: 'ver_efimero',
-    // Match: Si respondes "ver" a cualquier mensaje
-    match: (text, ctx) => /^ver$/i.test(text) && ctx.msg.message.extendedTextMessage?.contextInfo?.stanzaId,
+    name: 'revelar',
+    // Match para los comandos que traía tu código: read, revelar, readvo
+    match: (text, ctx) => /^(readviewonce|read|revelar|readvo|ver)$/i.test(text) && ctx.quoted,
     
-    execute: async ({ sock, remitente, msg }) => {
-        // Obtenemos el ID del mensaje citado
-        const quotedId = msg.message.extendedTextMessage.contextInfo.stanzaId;
-        const filePath = path.join(__dirname, `../data/viewonce/${quotedId}.bin`);
+    execute: async ({ sock, remitente, msg, quoted }) => {
+        // 1. Detectar el contenedor de "Ver una vez" (V1, V2 o Extension)
+        const viewOnce = quoted.viewOnceMessageV2 || quoted.viewOnceMessage || quoted.viewOnceMessageV2Extension;
 
-        if (!fs.existsSync(filePath)) {
-            return sock.sendMessage(remitente, { text: "❌ *Error:* El archivo no existe o ya pasaron las 2 horas de caché." }, { quoted: msg });
-        }
+        if (!viewOnce) return; // Si no es efímero, no hace nada.
+
+        const actualMsg = viewOnce.message;
+        const type = Object.keys(actualMsg)[0]; // imageMessage, videoMessage o audioMessage
+        const mediaData = actualMsg[type];
 
         try {
-            const buffer = fs.readFileSync(filePath);
-            // WhatsApp no nos dice si el archivo guardado era foto o video en el citado, 
-            // así que probamos a enviarlo como imagen (Baileys suele auto-detectar)
-            // o puedes chequear el buffer para ser más pro.
-            
-            await sock.sendMessage(remitente, { 
-                image: buffer, 
-                caption: "✅ *Contenido recuperado del caché local.*" 
-            }, { quoted: msg });
+            // 2. Descargar el buffer
+            const stream = await downloadContentFromMessage(
+                mediaData, 
+                type === 'imageMessage' ? 'image' : type === 'videoMessage' ? 'video' : 'audio'
+            );
 
-        } catch (err) {
-            await sock.sendMessage(remitente, { text: "❌ No pude procesar el archivo guardado." });
+            let buffer = Buffer.from([]);
+            for await (const chunk of stream) {
+                buffer = Buffer.concat([buffer, chunk]);
+            }
+
+            // 3. Reenviar según el tipo detectado
+            if (/video/.test(type)) {
+                return await sock.sendMessage(remitente, { 
+                    video: buffer, 
+                    caption: mediaData.caption || '✅ Video revelado',
+                    mimetype: 'video/mp4'
+                }, { quoted: msg });
+            } 
+            
+            if (/image/.test(type)) {
+                return await sock.sendMessage(remitente, { 
+                    image: buffer, 
+                    caption: mediaData.caption || '✅ Imagen revelada'
+                }, { quoted: msg });
+            }
+
+            if (/audio/.test(type)) {
+                return await sock.sendMessage(remitente, { 
+                    audio: buffer, 
+                    ptt: true,
+                    mimetype: 'audio/ogg; codecs=opus'
+                }, { quoted: msg });
+            }
+
+        } catch (error) {
+            console.error('Error en revelar:', error);
+            await sock.sendMessage(remitente, { text: '❌ El archivo ya no está disponible en los servidores de WA.' });
         }
     }
 };
