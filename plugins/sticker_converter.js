@@ -6,17 +6,21 @@ const util = require('util');
 const execPromise = util.promisify(exec);
 
 module.exports = {
-    name: 'sticker_to_media',
-    match: (text, ctx) => /^(img|toimg|tovideo|togif)$/i.test(text) && ctx.quoted?.stickerMessage,
+    name: 'sticker_to_img',
+    // EL FILTRO CRÍTICO: Solo entra si NO es animado (!ctx.quoted.stickerMessage.isAnimated)
+    match: (text, ctx) => 
+        /^(img|toimg)$/i.test(text) && 
+        ctx.quoted?.stickerMessage && 
+        !ctx.quoted.stickerMessage.isAnimated,
     
     execute: async ({ sock, remitente, msg, quoted }) => {
-        const isAnimated = quoted.stickerMessage.isAnimated;
-        const statusMsg = await sock.sendMessage(remitente, { text: `⏳ Procesando: ${isAnimated ? 'Video' : 'Imagen'}...` }, { quoted: msg });
+        const statusMsg = await sock.sendMessage(remitente, { text: "⏳ Convirtiendo sticker a imagen..." }, { quoted: msg });
 
         const tempWebp = path.join(__dirname, `../temp_${Date.now()}.webp`);
-        const tempOut = path.join(__dirname, `../out_${Date.now()}.${isAnimated ? 'mp4' : 'png'}`);
+        const tempOut = path.join(__dirname, `../out_${Date.now()}.png`);
 
         try {
+            // 1. Descargar el sticker
             const stream = await downloadContentFromMessage(quoted.stickerMessage, 'sticker');
             let buffer = Buffer.from([]);
             for await (const chunk of stream) {
@@ -24,29 +28,24 @@ module.exports = {
             }
             fs.writeFileSync(tempWebp, buffer);
 
-            // COMANDO REFORZADO:
-            // -vcodec webp: Fuerza el decodificador correcto para webp animado
-            // -probesize / -analyzeduration: Ayuda a detectar frames en archivos mal formados
-            const ffmpegCmd = isAnimated 
-    ? `./ffmpeg -i ${tempWebp} -pix_fmt yuv420p -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" -c:v libx264 -preset fast -crf 22 -movflags faststart ${tempOut}`
-    : `./ffmpeg -i ${tempWebp} ${tempOut}`;
-
-            await execPromise(ffmpegCmd);
+            // 2. Conversión simple (WebP estático -> PNG)
+            // Usamos el FFmpeg de la raíz que ya sabemos que funciona para fotos
+            await execPromise(`./ffmpeg -i ${tempWebp} ${tempOut}`);
 
             if (fs.existsSync(tempOut)) {
-                if (isAnimated) {
-                    await sock.sendMessage(remitente, { video: { url: tempOut }, caption: '✅ Video generado.' }, { quoted: msg });
-                } else {
-                    await sock.sendMessage(remitente, { image: { url: tempOut }, caption: '✅ Imagen generada.' }, { quoted: msg });
-                }
+                await sock.sendMessage(remitente, { 
+                    image: { url: tempOut }, 
+                    caption: '✅ Aquí tienes tu imagen.' 
+                }, { quoted: msg });
             } else {
-                throw new Error("FFmpeg no generó el archivo de salida.");
+                throw new Error("Error al generar la imagen.");
             }
 
         } catch (err) {
-            console.error("DETALLE ERROR:", err);
-            await sock.sendMessage(remitente, { text: `❌ Error: El sticker animado tiene un formato incompatible o el servidor no tiene RAM suficiente.` });
+            console.error("Error en conversor:", err.message);
+            await sock.sendMessage(remitente, { text: "❌ No se pudo convertir este sticker." });
         } finally {
+            // Limpieza obligatoria de temporales
             if (fs.existsSync(tempWebp)) fs.unlinkSync(tempWebp);
             if (fs.existsSync(tempOut)) fs.unlinkSync(tempOut);
             await sock.sendMessage(remitente, { delete: statusMsg.key });
