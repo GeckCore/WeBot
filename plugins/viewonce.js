@@ -1,18 +1,34 @@
+const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
+
 module.exports = {
-    name: 'revelar',
-    // Match para los comandos: read, revelar, ver
-    match: (text, ctx) => /^(read|revelar|ver|readvo)$/i.test(text) && ctx.isViewOnce,
+    name: 'ver_efimero',
+    // Responde a ver, read, revelar
+    match: (text, ctx) => /^(ver|read|revelar)$/i.test(text) && ctx.msg.message.extendedTextMessage?.contextInfo?.stanzaId,
     
-    execute: async ({ sock, remitente, msg, quoted, downloadContentFromMessage }) => {
-        // 'quoted' aquí ya es el mensaje interno (imageMessage o videoMessage) gracias al index.js
-        const type = Object.keys(quoted)[0]; 
-        const mediaData = quoted[type];
+    execute: async ({ sock, remitente, msg }) => {
+        // Obtenemos el ID único del mensaje original al que respondiste
+        const quotedId = msg.message.extendedTextMessage.contextInfo.stanzaId;
+
+        // Buscamos el mensaje original en nuestra memoria RAM
+        const originalMsg = global.efimerosCache.get(quotedId);
+
+        if (!originalMsg) {
+            return sock.sendMessage(remitente, { 
+                text: "❌ El archivo no está en caché. (El bot estaba apagado cuando se envió o ya pasaron 2 horas)." 
+            }, { quoted: msg });
+        }
+
+        // El mensaje guardado ya es el contenedor limpio (imageMessage o videoMessage)
+        const type = Object.keys(originalMsg)[0]; 
+        const mediaData = originalMsg[type];
+
+        let statusMsg = await sock.sendMessage(remitente, { text: "⏳ Desencriptando archivo con llave local..." }, { quoted: msg });
 
         try {
-            // Descargamos el buffer (exactamente como en The Mystic)
+            // Descargamos usando la información del caché, no del mensaje citado
             const stream = await downloadContentFromMessage(
                 mediaData, 
-                type === 'imageMessage' ? 'image' : type === 'videoMessage' ? 'video' : 'audio'
+                type === 'imageMessage' ? 'image' : 'video'
             );
 
             let buffer = Buffer.from([]);
@@ -20,33 +36,27 @@ module.exports = {
                 buffer = Buffer.concat([buffer, chunk]);
             }
 
-            if (/video/.test(type)) {
-                return await sock.sendMessage(remitente, { 
+            if (type === 'videoMessage') {
+                await sock.sendMessage(remitente, { 
                     video: buffer, 
-                    caption: mediaData.caption || '',
+                    caption: "✅ *Tarea revelada*",
                     mimetype: 'video/mp4'
                 }, { quoted: msg });
-            } 
-            
-            if (/image/.test(type)) {
-                return await sock.sendMessage(remitente, { 
+            } else {
+                await sock.sendMessage(remitente, { 
                     image: buffer, 
-                    caption: mediaData.caption || '',
-                    mimetype: 'image/jpeg'
+                    caption: "✅ *Tarea revelada*" 
                 }, { quoted: msg });
             }
 
-            if (/audio/.test(type)) {
-                return await sock.sendMessage(remitente, { 
-                    audio: buffer, 
-                    ptt: true,
-                    mimetype: 'audio/ogg; codecs=opus'
-                }, { quoted: msg });
-            }
+            await sock.sendMessage(remitente, { delete: statusMsg.key });
 
         } catch (error) {
-            console.error('Error al revelar:', error);
-            await sock.sendMessage(remitente, { text: '❌ Error: No se pudo descargar. El archivo ya fue abierto o expiró.' });
+            console.error('Error al desencriptar:', error);
+            await sock.sendMessage(remitente, { 
+                text: '❌ Error: WhatsApp ya borró el archivo de sus servidores o la llave expiró.',
+                edit: statusMsg.key
+            });
         }
     }
 };
