@@ -2,6 +2,28 @@ const { default: makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion,
 const qrcode = require('qrcode-terminal');
 const fs = require('fs');
 const path = require('path');
+const lodash = require('lodash');
+
+// --- MOTOR DE BASE DE DATOS (Persistencia para warns, niveles, etc.) ---
+const Low = require('lowdb');
+const JSONFile = require('lowdb/adapters/JSONFile');
+
+// Inicializamos la DB en el objeto global para que los plugins accedan a global.db.data
+global.db = new Low(new JSONFile('database.json'));
+
+async function loadDatabase() {
+    if (global.db.data) return;
+    await global.db.read();
+    global.db.data = {
+        users: {},
+        chats: {},
+        settings: {},
+        ...(global.db.data || {}),
+    };
+    global.db.chain = lodash.chain(global.db.data);
+    console.log('[INFO] Base de datos cargada correctamente.');
+}
+loadDatabase();
 
 // --- OPTIMIZACIÓN DE ARRANQUE: PERMISOS Y VERIFICACIÓN DE BINARIOS ---
 const isWindows = process.platform === 'win32';
@@ -15,15 +37,13 @@ binarios.forEach(bin => {
         try {
             if (!isWindows) {
                 fs.chmodSync(binPath, '755');
-                console.log(`[INFO] Permisos de ${fileName} configurados (chmod +x).`);
-            } else {
-                console.log(`[INFO] Binario ${fileName} detectado en Windows.`);
+                console.log(`[INFO] Permisos de ${fileName} configurados.`);
             }
         } catch (err) {
             console.error(`[ERROR] No se pudieron aplicar permisos a ${fileName}:`, err.message);
         }
     } else {
-        console.error(`[CRÍTICO] Falta el binario: "${fileName}" en la raíz (${__dirname}). El bot tendrá funciones limitadas.`);
+        console.error(`[CRÍTICO] Falta binario: "${fileName}" en la raíz.`);
     }
 });
 
@@ -37,6 +57,7 @@ const plugins = fs.readdirSync(pluginsDir)
 async function iniciarBot() {
     const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
     const { version, isLatest } = await fetchLatestBaileysVersion();
+    
     console.log(`[INFO] Versión WA Web: ${version.join('.')} (Última: ${isLatest})`);
 
     const sock = makeWASocket({
@@ -48,6 +69,7 @@ async function iniciarBot() {
     });
 
     sock.ev.on('creds.update', saveCreds);
+
     sock.ev.on('connection.update', (update) => {
         const { connection, qr } = update;
         if (qr) qrcode.generate(qr, { small: true });
@@ -55,7 +77,7 @@ async function iniciarBot() {
             console.log('[INFO] Conexión cerrada. Reconectando...');
             iniciarBot();
         } else if (connection === 'open') {
-            console.log(`[INFO] ¡Conectado a WhatsApp! (${plugins.length} plugins cargados)`);
+            console.log(`[INFO] ¡Conectado! (${plugins.length} plugins cargados)`);
         }
     });
 
@@ -75,17 +97,36 @@ async function iniciarBot() {
         const msg = m.messages[0];
         if (!msg.message || msg.key.remoteJid === 'status@broadcast') return;
 
+        // Auto-guardado de DB al recibir mensaje si hay cambios
+        if (global.db.data) await global.db.write();
+
         const remitente = msg.key.remoteJid;
         const fromMe = msg.key.fromMe;
         const texto = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
         const textoLimpio = texto.trim();
-        const msgType = Object.keys(msg.message).find(k => ['videoMessage', 'imageMessage', 'documentMessage', 'audioMessage'].includes(k));
+        
+        // Identificar si es un mensaje multimedia
+        const msgType = Object.keys(msg.message).find(k => 
+            ['videoMessage', 'imageMessage', 'documentMessage', 'audioMessage'].includes(k)
+        );
+        
+        // Extraer mensaje citado
         const quoted = msg.message.extendedTextMessage?.contextInfo?.quotedMessage;
 
         if (!textoLimpio && !msgType) return;
 
-        // Contexto centralizado que se envía a los plugins
-        const ctx = { sock, msg, remitente, textoLimpio, fromMe, getMediaInfo, downloadContentFromMessage, quoted, msgType };
+        // Contexto centralizado para los plugins
+        const ctx = { 
+            sock, 
+            msg, 
+            remitente, 
+            textoLimpio, 
+            fromMe, 
+            getMediaInfo, 
+            downloadContentFromMessage, 
+            quoted, 
+            msgType 
+        };
 
         for (const plugin of plugins) {
             if (plugin.match(textoLimpio, ctx)) {
@@ -101,5 +142,5 @@ async function iniciarBot() {
     });
 }
 
-console.log("Iniciando motor modular...");
+console.log("Iniciando motor modular con persistencia...");
 iniciarBot();
