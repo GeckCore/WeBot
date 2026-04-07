@@ -5,7 +5,6 @@ module.exports = {
     match: (text) => /^\.(ver|read|revelar)$/i.test(text),
 
     execute: async ({ sock, remitente, msg }) => {
-        // ── 1. Obtener el ID del mensaje citado ───────────────────────────
         const contextInfo = msg.message?.extendedTextMessage?.contextInfo;
         const targetId    = contextInfo?.stanzaId;
         const targetJid   = contextInfo?.remoteJid || remitente;
@@ -16,17 +15,12 @@ module.exports = {
             }, { quoted: msg });
         }
 
-        // ── 2. Búsqueda en tres capas ─────────────────────────────────────
-        //   A) global.mediaCache  (RAM, mensajes de esta sesión + sesiones previas persistidas)
-        //   B) global.store       (store en memoria de Baileys)
-        //   C) contextInfo del propio mensaje citado (Baileys lo incluye a veces)
         let originalMsg =
             global.mediaCache?.get(targetId) ||
             global.store?.loadMessage(targetJid, targetId) ||
             global.store?.loadMessage(remitente, targetId) ||
             null;
 
-        // Capa C: en ocasiones Baileys adjunta el mensaje citado directamente
         if (!originalMsg && contextInfo?.quotedMessage) {
             originalMsg = {
                 key: { remoteJid: targetJid, id: targetId },
@@ -41,14 +35,11 @@ module.exports = {
                     '',
                     'Esto ocurre cuando:',
                     '• El mensaje fue enviado *antes* de que el bot arrancara y aún no había caché en disco.',
-                    '• El mensaje fue purgado de la RAM (más de 1 500 mensajes en caché).',
-                    '',
-                    'El bot ahora guarda los mensajes en disco automáticamente. A partir del próximo reinicio este error no debería repetirse.',
+                    '• El mensaje fue purgado de la RAM (más de 3000 mensajes en caché).',
                 ].join('\n')
             }, { quoted: msg });
         }
 
-        // ── 3. Desempaquetado agresivo de capas de cifrado ────────────────
         let content = originalMsg.message;
         let unwrapping = true;
 
@@ -62,7 +53,6 @@ module.exports = {
             else unwrapping = false;
         }
 
-        // ── 4. Detectar tipo de media ─────────────────────────────────────
         const MEDIA_TYPES = ['imageMessage', 'videoMessage', 'audioMessage'];
         const mediaTypeKey = Object.keys(content || {}).find(k => MEDIA_TYPES.includes(k));
 
@@ -74,11 +64,10 @@ module.exports = {
         }
 
         const mediaMsg  = content[mediaTypeKey];
-        const mediaType = mediaTypeKey.replace('Message', ''); // 'image' | 'video' | 'audio'
+        const mediaType = mediaTypeKey.replace('Message', '');
 
         await sock.sendMessage(remitente, { text: '⏳ Desencriptando...' }, { quoted: msg });
 
-        // ── 5. Descargar y reenviar ───────────────────────────────────────
         try {
             const stream = await downloadContentFromMessage(mediaMsg, mediaType);
             const chunks = [];
@@ -97,8 +86,7 @@ module.exports = {
                 text: [
                     '❌ *No se pudo descargar el media.*',
                     '',
-                    'Posible causa: la URL de descarga de WhatsApp ha expirado.',
-                    'Las URLs del CDN de Meta caducan después de varias semanas.',
+                    'Posible causa: la URL de descarga de WhatsApp ha expirado o la key está corrupta.',
                     `Detalle técnico: \`${err.message}\``,
                 ].join('\n')
             }, { quoted: msg });
