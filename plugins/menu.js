@@ -30,7 +30,9 @@ const descriptions = {
             'tomp3.js': 'Extrae audio de video. (Responder "mp3" a video)',
             'translate.js': 'Traductor rápido. (Responder "t" a mensaje)',
             'qr.js': 'Crea un QR. (Responder con ".qr" a mensaje)',
-            'readqr.js': 'Lee un QR. (Responder a imagen de QR)',
+            'readqr.js': 'Lee un QR. (Responder a imagen de QR con ".readqr")',
+            'grupo.js': 'Abre o cierra el bot en grupos. (Usar ".grupo on/off")',
+            'warn.js': 'Advierte a miembro de grupo. (Usar ".warn @user")',
             'web_screenshot.js': 'Captura de pantalla web. (view + link)'
         };
 
