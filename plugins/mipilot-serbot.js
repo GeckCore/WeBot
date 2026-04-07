@@ -36,20 +36,15 @@ export default {
                 auth: state,
                 logger: pino({ level: 'silent' }),
                 printQRInTerminal: false,
-                browser: Browsers.macOS('Desktop'), // Estandarizado para evitar rechazos de dispositivo
+                browser: Browsers.macOS('Desktop'),
                 syncFullHistory: false,
-                markOnline: false, 
-                defaultQueryTimeoutMs: undefined,
+                // FIX CRÍTICO 1: WhatsApp exige que el dispositivo esté online durante el emparejamiento 
+                // para confirmar la recepción del historial inicial.
+                markOnline: true, 
                 getMessage: async (key) => {
-                    // FIX ABSOLUTO: Devolver undefined o el mensaje real. 
-                    // Un objeto falso causa el Error 479 y el crasheo 515 en Meta.
-                    return global.store?.loadMessage(key.remoteJid, key.id)?.message || undefined;
+                    return global.store?.loadMessage?.(key.remoteJid, key.id)?.message || undefined;
                 }
             });
-
-            let qrSent = false;
-            let qrMsg = null;
-            let isClosed = false;
 
             subSock.ev.on('creds.update', saveCreds);
 
@@ -59,25 +54,15 @@ export default {
                 // --- MANEJO DE QR ---
                 if (qr) {
                     try {
-                        const qrBuffer = await QRCode.toBuffer(qr);
-                        const caption = '🤳 *¡CONVIÉRTETE EN BOT!* 🤳\n\nEscanea este código QR para vincular tu número a la VPS.\n\n*Nota:* Si el código falla, asegúrate de no tener muchas sesiones activas.';
+                        // FIX CRÍTICO 2: Forzar un buffer PNG estándar con margen y escala.
+                        // Esto evita que 'sharp' lance "unsupported image format" y crashee el emparejamiento.
+                        const qrBuffer = await QRCode.toBuffer(qr, { type: 'png', margin: 4, scale: 4 });
+                        const caption = '🤳 *¡CONVIÉRTETE EN BOT!* 🤳\n\nEscanea este código QR para vincular tu número a la VPS.\n\n*Nota:* Este código se actualizará en unos segundos si no lo escaneas.';
                         
-                        if (!qrSent) {
-                            qrMsg = await sock.sendMessage(remitente, { 
-                                image: qrBuffer, 
-                                caption,
-                                thumbnail: Buffer.alloc(0) 
-                            }, { quoted: msg });
-                            qrSent = true;
-                        } else {
-                            await sock.sendMessage(remitente, { 
-                                image: qrBuffer, 
-                                caption,
-                                thumbnail: Buffer.alloc(0)
-                            }, { quoted: msg });
-                        }
+                        // Enviamos la imagen de forma limpia, sin modificar el thumbnail
+                        await sock.sendMessage(remitente, { image: qrBuffer, caption }, { quoted: msg });
                     } catch (e) {
-                        console.error('Error al enviar QR:', e);
+                        console.error('Error de Buffer al generar QR:', e);
                     }
                 }
 
@@ -92,15 +77,13 @@ export default {
                         mentions: [userJid]
                     });
                     
-                    console.log(`[SUB-BOT] Sesión abierta por ${userNumber}`);
+                    console.log(`[SUB-BOT] Sesión estable abierta por ${userNumber}`);
                 }
 
                 if (connection === 'close') {
-                    isClosed = true;
                     const code = lastDisconnect?.error?.output?.statusCode;
                     const reason = lastDisconnect?.error?.output?.payload?.message || 'Desconocida';
                     
-                    // Si el error es 401 (Unauthorized), es un logout real
                     const isLogout = code === 401;
 
                     console.log(`[SUB-BOT] Conexión cerrada para ${userNumber}. Razón: ${reason} (${code})`);
@@ -109,24 +92,25 @@ export default {
                     if (index > -1) global.conns.splice(index, 1);
 
                     if (!isLogout) {
+                        // FIX CRÍTICO 3: Eliminamos removeAllListeners() porque mataba el proceso de 
+                        // guardado de credenciales durante la reconexión de emergencia.
                         console.log(`[SUB-BOT] Reintentando conexión para ${userNumber} en 5 segundos...`);
-                        subSock.ev.removeAllListeners(); // Evita fugas de memoria y acumulación de eventos
                         setTimeout(() => startSubBot(), 5000);
                     } else {
                         fs.rmSync(sessionPath, { recursive: true, force: true });
-                        await sock.sendMessage(remitente, { text: '❌ Sesión cerrada permanentemente. Los archivos de sesión han sido eliminados.' });
+                        await sock.sendMessage(remitente, { text: '❌ Sesión cerrada permanentemente desde el teléfono. Los archivos han sido eliminados.' });
                     }
                 }
             });
 
             subSock.ev.on('messages.upsert', async (m) => {
-                // Delegación de mensajes del sub-bot (vacío por ahora)
+                // Delegación de mensajes del sub-bot (Módulo preparativo)
             });
         }
 
         startSubBot().catch(err => {
-            console.error('Error en el proceso del Sub-Bot:', err);
-            sock.sendMessage(remitente, { text: '❌ No se pudo iniciar el proceso de vinculación.' });
+            console.error('Error fatal en el proceso del Sub-Bot:', err);
+            sock.sendMessage(remitente, { text: '❌ Fallo crítico al iniciar el sub-bot. Revisa la consola de la VPS.' });
         });
     }
 };
