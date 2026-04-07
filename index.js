@@ -1,4 +1,11 @@
-const { default: makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion, downloadContentFromMessage, makeInMemoryStore } = require('@whiskeysockets/baileys');
+// --- IMPORTACIÓN SEGURA (Bypass para ESM a CommonJS) ---
+const baileys = require('@whiskeysockets/baileys');
+const makeWASocket = baileys.default || baileys.makeWASocket;
+const useMultiFileAuthState = baileys.useMultiFileAuthState || baileys.default?.useMultiFileAuthState;
+const fetchLatestBaileysVersion = baileys.fetchLatestBaileysVersion || baileys.default?.fetchLatestBaileysVersion;
+const downloadContentFromMessage = baileys.downloadContentFromMessage || baileys.default?.downloadContentFromMessage;
+const makeInMemoryStore = baileys.makeInMemoryStore || baileys.default?.makeInMemoryStore;
+
 const qrcode = require('qrcode-terminal');
 const fs = require('fs');
 const path = require('path');
@@ -17,7 +24,7 @@ global.store.readFromFile('./baileys_store.json');
 
 // Guardado automático cada 10 segundos
 setInterval(() => {
-    global.store.writeToFile('./baileys_store.json');
+    if (global.store) global.store.writeToFile('./baileys_store.json');
 }, 10000);
 
 const isWindows = process.platform === 'win32';
@@ -54,7 +61,7 @@ async function iniciarBot() {
     });
 
     // VINCULACIÓN CRÍTICA (Como en main.js)
-    global.store.bind(sock.ev);
+    if (global.store) global.store.bind(sock.ev);
 
     sock.ev.on('creds.update', saveCreds);
 
