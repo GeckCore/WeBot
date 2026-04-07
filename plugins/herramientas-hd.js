@@ -56,7 +56,7 @@ export default {
 
             await sock.sendMessage(remitente, { text: tradutor.texto3 }, { quoted: msg });
 
-            // 3. Descargar y subir imagen (Migrado a Catbox para mayor estabilidad)
+            // 3. Descargar y subir imagen a Catbox
             const stream = await downloadContentFromMessage(imageNode, 'image');
             let buffer = Buffer.from([]);
             for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
@@ -65,8 +65,8 @@ export default {
 
             const imageUrl = await uploadToCatbox(buffer);
             
-            // 4. Llamar a la API de Stellar
-            const hdImageBuffer = await upscaleWithStellar(imageUrl);
+            // 4. Llamar a las APIs de mejora (con doble respaldo)
+            const hdImageBuffer = await upscaleImage(imageUrl);
 
             // 5. Enviar resultado
             await sock.sendMessage(remitente, { 
@@ -84,7 +84,6 @@ export default {
 
 /**
  * Sube un buffer a Catbox.moe
- * Más estable que Telegra.ph para VPS
  */
 async function uploadToCatbox(buffer) {
     const ft = await fileTypeFromBuffer(buffer);
@@ -112,15 +111,26 @@ async function uploadToCatbox(buffer) {
 }
 
 /**
- * Llama a la API de Stellar para el escalado
+ * Mejora la imagen usando APIs públicas estables con sistema de respaldo
  */
-async function upscaleWithStellar(url) {
-    const endpoint = `https://api.stellarwa.xyz/tools/upscale?url=${url}&key=BrunoSobrino`;
-    
-    const { data } = await axios.get(endpoint, {
-        responseType: "arraybuffer",
-        headers: { "accept": "image/*" }
-    });
-
-    return Buffer.from(data);
+async function upscaleImage(url) {
+    try {
+        // Intento 1: API de Siputzx (Muy rápida y estable)
+        const endpoint1 = `https://api.siputzx.my.id/api/tools/remini?url=${url}`;
+        const { data } = await axios.get(endpoint1, {
+            responseType: "arraybuffer",
+            headers: { "accept": "image/*" }
+        });
+        return Buffer.from(data);
+    } catch (err1) {
+        console.log('[HD] Falló API primaria, intentando respaldo...');
+        
+        // Intento 2: API de Ryzendesu (Respaldo confiable)
+        const endpoint2 = `https://api.ryzendesu.vip/api/ai/remini?url=${url}`;
+        const { data } = await axios.get(endpoint2, {
+            responseType: "arraybuffer",
+            headers: { "accept": "image/*", "User-Agent": "Mozilla/5.0" }
+        });
+        return Buffer.from(data);
+    }
 }
