@@ -1,4 +1,4 @@
-const { default: makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion, downloadContentFromMessage, makeInMemoryStore } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion, downloadContentFromMessage } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode-terminal');
 const fs = require('fs');
 const path = require('path');
@@ -10,27 +10,8 @@ const adapter = new FileSync('database.json');
 global.db = low(adapter);
 global.db.defaults({ users: {}, chats: {}, settings: {} }).write();
 
-// --- LOGGER FALSO (El Bypass para Baileys) ---
-// Engaña a makeInMemoryStore para que se inicialice sin requerir librerías externas
-const dummyLogger = {
-    level: 'silent',
-    trace: () => {},
-    debug: () => {},
-    info: () => {},
-    warn: () => {},
-    error: () => {},
-    fatal: () => {},
-    child: function() { return this; }
-};
-
-// --- ALMACENAMIENTO EN MEMORIA (Método The Mystic) ---
-global.store = makeInMemoryStore({ logger: dummyLogger });
-global.store.readFromFile('./baileys_store.json');
-
-// Auto-salvado cada 10 segundos
-setInterval(() => {
-    if (global.store) global.store.writeToFile('./baileys_store.json');
-}, 10_000);
+// --- CACHÉ RAM (El Interceptor) ---
+global.mediaCache = new Map();
 
 const isWindows = process.platform === 'win32';
 const binarios = ['yt-dlp', 'ffmpeg'];
@@ -51,22 +32,12 @@ async function iniciarBot() {
     const { version } = await fetchLatestBaileysVersion();
 
     const sock = makeWASocket({
-        version, 
-        auth: state, 
+        version,
+        auth: state,
         printQRInTerminal: false,
-        browser: ['TheMystic-Bot-MD', 'Safari', '2.0.0'], 
-        syncFullHistory: false,
-        getMessage: async (key) => {
-            if (global.store) {
-                const msg = await global.store.loadMessage(key.remoteJid, key.id);
-                return msg?.message || undefined;
-            }
-            return { conversation: 'Mensaje no encontrado' };
-        }
+        browser: ['Bot-Privado', 'Chrome', '122.0.0.0'],
+        syncFullHistory: false
     });
-
-    // VINCULACIÓN CRÍTICA: Ya no dará error porque el store está forzado a existir
-    global.store.bind(sock.ev);
 
     sock.ev.on('creds.update', saveCreds);
 
@@ -93,12 +64,24 @@ async function iniciarBot() {
         const msg = m.messages[0];
         if (!msg.message || msg.key.remoteJid === 'status@broadcast') return;
 
+        // --- INTERCEPTOR ABSOLUTO DE CACHÉ ---
+        // Guardamos la estructura criptográfica en RAM antes de que cualquier filtro la descarte.
+        global.mediaCache.set(msg.key.id, msg.message);
+        
+        // Auto-limpieza: Libera la RAM tras 60 minutos.
+        setTimeout(() => global.mediaCache.delete(msg.key.id), 3600000);
+        // -------------------------------------
+
         global.db.data = global.db.getState();
 
         const remitente = msg.key.remoteJid;
         const texto = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
         const textoLimpio = texto.trim();
         const quoted = msg.message.extendedTextMessage?.contextInfo?.quotedMessage;
+
+        // El filtro ya no bloqueará los ViewOnce
+        const msgType = Object.keys(msg.message)[0];
+        if (!textoLimpio && !['videoMessage', 'imageMessage', 'audioMessage', 'documentMessage', 'viewOnceMessage', 'viewOnceMessageV2', 'viewOnceMessageV2Extension'].includes(msgType)) return;
 
         const ctx = { sock, msg, remitente, textoLimpio, getMediaInfo, downloadContentFromMessage, quoted };
 
