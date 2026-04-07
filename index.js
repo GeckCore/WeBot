@@ -2,29 +2,21 @@ const { default: makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion,
 const qrcode = require('qrcode-terminal');
 const fs = require('fs');
 const path = require('path');
+const { pathToFileURL } = require('url');
 const lodash = require('lodash');
 
-// --- MOTOR DE BASE DE DATOS (Sintaxis Correcta para lowdb@1.0.0) ---
+// --- MOTOR DE BASE DE DATOS (lowdb@1.0.0) ---
 const low = require('lowdb');
 const FileSync = require('lowdb/adapters/FileSync');
 const adapter = new FileSync('database.json');
-
-// Inicializamos la base de datos de forma síncrona
 global.db = low(adapter);
-
-// Establecemos los valores por defecto si el archivo está vacío
-global.db.defaults({ 
-    users: {}, 
-    chats: {}, 
-    settings: {} 
-}).write();
+global.db.defaults({ users: {}, chats: {}, settings: {} }).write();
 
 console.log('[INFO] Base de datos JSON cargada y lista.');
 
 // --- OPTIMIZACIÓN DE ARRANQUE: BINARIOS ---
 const isWindows = process.platform === 'win32';
 const binarios = ['yt-dlp', 'ffmpeg'];
-
 binarios.forEach(bin => {
     const fileName = isWindows ? `${bin}.exe` : bin;
     const binPath = path.join(__dirname, fileName);
@@ -33,16 +25,31 @@ binarios.forEach(bin => {
     }
 });
 
-// --- CARGA DINÁMICA DE PLUGINS ---
-const pluginsDir = path.join(__dirname, 'plugins');
-if (!fs.existsSync(pluginsDir)) fs.mkdirSync(pluginsDir);
-const plugins = fs.readdirSync(pluginsDir)
-    .filter(file => file.endsWith('.js'))
-    .map(file => require(path.join(pluginsDir, file)));
+// Variable global para los plugins
+let plugins = [];
 
 async function iniciarBot() {
+    // --- CARGA DINÁMICA DE PLUGINS (Soporte para ESM y Top-level await) ---
+    const pluginsDir = path.join(__dirname, 'plugins');
+    if (!fs.existsSync(pluginsDir)) fs.mkdirSync(pluginsDir);
+    
+    const pluginFiles = fs.readdirSync(pluginsDir).filter(file => file.endsWith('.js'));
+    
+    plugins = await Promise.all(pluginFiles.map(async (file) => {
+        try {
+            const fullPath = path.join(pluginsDir, file);
+            // import() dinámico es compatible con CJS y puede cargar ESM con top-level await
+            const module = await import(pathToFileURL(fullPath).href);
+            return module.default || module;
+        } catch (err) {
+            console.error(`❌ Error cargando plugin ${file}:`, err.message);
+            return null;
+        }
+    }));
+    plugins = plugins.filter(p => p !== null);
+
     const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
-    const { version, isLatest } = await fetchLatestBaileysVersion();
+    const { version } = await fetchLatestBaileysVersion();
     
     const sock = makeWASocket({
         version, 
@@ -78,7 +85,6 @@ async function iniciarBot() {
         const msg = m.messages[0];
         if (!msg.message || msg.key.remoteJid === 'status@broadcast') return;
 
-        // Actualizamos el estado de la base de datos para los plugins
         global.db.data = global.db.getState();
 
         const remitente = msg.key.remoteJid;
@@ -87,7 +93,6 @@ async function iniciarBot() {
         const msgType = Object.keys(msg.message).find(k => ['videoMessage', 'imageMessage', 'documentMessage', 'audioMessage'].includes(k));
         const quoted = msg.message.extendedTextMessage?.contextInfo?.quotedMessage;
 
-        // Filtro para ignorar mensajes vacíos o que no sean comandos/multimedia básicos
         if (!textoLimpio && !msgType) return;
 
         const ctx = { 
@@ -105,7 +110,6 @@ async function iniciarBot() {
             if (plugin.match && plugin.match(textoLimpio, ctx)) {
                 try {
                     await plugin.execute(ctx);
-                    // Guardamos los cambios en el archivo tras ejecutar un comando con éxito
                     global.db.write();
                 } catch (err) {
                     console.error(`Error en plugin ${plugin.name}:`, err);
