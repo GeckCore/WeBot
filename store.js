@@ -51,7 +51,6 @@ function makeInMemoryStore() {
         
         const msgId = message.key?.id;
         
-        // Mantener la caché global sincronizada para que viewonce.js encuentre el ID
         if (msgId) {
             if (!global.mediaCache) global.mediaCache = new Map();
             global.mediaCache.set(msgId, message);
@@ -67,7 +66,6 @@ function makeInMemoryStore() {
             type === 'append' ? messages[jid].push(message) : messages[jid].unshift(message);
         }
 
-        // Prevenir consumo masivo de RAM
         if (messages[jid].length > MAX_MESSAGES_PER_CHAT) {
             messages[jid].splice(0, messages[jid].length - MAX_MESSAGES_PER_CHAT);
         }
@@ -81,7 +79,8 @@ function makeInMemoryStore() {
                 for (const msg of historyMessages) {
                     const jid = getJid(msg.key.remoteJid);
                     if (!jid || isJidBroadcast(jid)) continue;
-                    upsertMessage(jid, proto.WebMessageInfo.fromObject(msg), 'append');
+                    // Se inyecta 'msg' directamente, sin proto.WebMessageInfo.fromObject
+                    upsertMessage(jid, msg, 'append');
                 }
             }
         });
@@ -91,7 +90,8 @@ function makeInMemoryStore() {
                 for (const msg of newMessages) {
                     const jid = getJid(msg.key.remoteJid);
                     if (!jid || isJidBroadcast(jid)) continue;
-                    upsertMessage(jid, proto.WebMessageInfo.fromObject(msg), type);
+                    // Se inyecta 'msg' directamente, sin proto.WebMessageInfo.fromObject
+                    upsertMessage(jid, msg, type);
                 }
             }
         });
@@ -176,7 +176,8 @@ function makeInMemoryStore() {
     function fromJSON(json) {
         Object.assign(chats, json.chats);
         for (const jid in json.messages) {
-            messages[jid] = json.messages[jid].map(m => m && proto.WebMessageInfo.fromObject(m));
+            // Aquí se restaura como objeto normal para no perder propiedades tampoco
+            messages[jid] = json.messages[jid].map(m => m);
         }
     }
 
@@ -184,8 +185,6 @@ function makeInMemoryStore() {
 }
 
 const store = makeInMemoryStore();
-
-// Exposición imperativa en RAM global para viewonce
 global.store = store;
 
 export default store;
