@@ -1,22 +1,20 @@
-const { default: makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion, downloadContentFromMessage } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion, downloadContentFromMessage, makeInMemoryStore } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode-terminal');
 const fs = require('fs');
 const path = require('path');
-const lodash = require('lodash');
+const pino = require('pino');
 
-// --- MOTOR DE BASE DE DATOS (Sin dependencias externas inestables) ---
+// --- BASE DE DATOS (Para niveles, warns, etc) ---
 const low = require('lowdb');
 const FileSync = require('lowdb/adapters/FileSync');
 const adapter = new FileSync('database.json');
 global.db = low(adapter);
+global.db.defaults({ users: {}, chats: {}, settings: {} }).write();
 
-// Iniciamos la base de datos añadiendo el sector 'viewonce'
-global.db.defaults({ users: {}, chats: {}, settings: {}, viewonce: {} }).write();
+// --- ALMACENAMIENTO EN MEMORIA (El método de The Mystic) ---
+// Esto guardará todos los mensajes en la RAM automáticamente
+global.store = makeInMemoryStore({ logger: pino({ level: 'silent' }) });
 
-// Caché ultra-rápida en RAM
-global.mediaCache = new Map();
-
-// --- VERIFICACIÓN DE BINARIOS ---
 const isWindows = process.platform === 'win32';
 const binarios = ['yt-dlp', 'ffmpeg'];
 binarios.forEach(bin => {
@@ -41,8 +39,10 @@ async function iniciarBot() {
         printQRInTerminal: false,
         browser: ['TheMystic-Bot-MD', 'Safari', '2.0.0'], 
         syncFullHistory: false
-        // Hemos eliminado getMessage y makeInMemoryStore para evitar el crasheo radical
     });
+
+    // VINCULACIÓN CRÍTICA: Aquí es donde Baileys empieza a guardar el historial en el 'store'
+    global.store.bind(sock.ev);
 
     sock.ev.on('creds.update', saveCreds);
 
@@ -68,26 +68,6 @@ async function iniciarBot() {
     sock.ev.on('messages.upsert', async (m) => {
         const msg = m.messages[0];
         if (!msg.message || msg.key.remoteJid === 'status@broadcast') return;
-
-        // --- INTERCEPTOR VIEW ONCE (Cero Crasheos) ---
-        const msgId = msg.key.id;
-        let isViewOnce = false;
-        let content = msg.message;
-        
-        if (content?.ephemeralMessage) content = content.ephemeralMessage.message;
-        const innerType = Object.keys(content || {})[0];
-        
-        if (innerType && innerType.includes('viewOnce')) {
-            isViewOnce = true;
-        }
-
-        if (isViewOnce) {
-            // Guardamos en RAM (rápido) y en Base de Datos (permanente)
-            global.mediaCache.set(msgId, msg.message);
-            if (!global.db.data.viewonce) global.db.data.viewonce = {};
-            global.db.data.viewonce[msgId] = msg.message;
-            global.db.write();
-        }
 
         global.db.data = global.db.getState();
 
