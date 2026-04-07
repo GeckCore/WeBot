@@ -2,18 +2,23 @@ const { default: makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion,
 const qrcode = require('qrcode-terminal');
 const fs = require('fs');
 const path = require('path');
-const pino = require('pino');
 
-// --- BASE DE DATOS (Para niveles, warns, etc) ---
+// --- BANCO DE DADOS (Níveis, Warns, etc) ---
 const low = require('lowdb');
 const FileSync = require('lowdb/adapters/FileSync');
 const adapter = new FileSync('database.json');
 global.db = low(adapter);
 global.db.defaults({ users: {}, chats: {}, settings: {} }).write();
 
-// --- ALMACENAMIENTO EN MEMORIA (El método de The Mystic) ---
-// Esto guardará todos los mensajes en la RAM automáticamente
-global.store = makeInMemoryStore({ logger: pino({ level: 'silent' }) });
+// --- ARMAZENAMENTO NA MEMÓRIA (Método The Mystic Seguro) ---
+// Inicializamos sem logger externo para evitar crashes de MODULE_NOT_FOUND
+global.store = makeInMemoryStore({});
+global.store.readFromFile('./baileys_store.json');
+
+// Auto-salvamento a cada 10 segundos
+setInterval(() => {
+    if (global.store) global.store.writeToFile('./baileys_store.json');
+}, 10_000);
 
 const isWindows = process.platform === 'win32';
 const binarios = ['yt-dlp', 'ffmpeg'];
@@ -38,11 +43,19 @@ async function iniciarBot() {
         auth: state, 
         printQRInTerminal: false,
         browser: ['TheMystic-Bot-MD', 'Safari', '2.0.0'], 
-        syncFullHistory: false
+        syncFullHistory: false,
+        // Interceptador nativo para reconstruir mensagens perdidas
+        getMessage: async (key) => {
+            if (global.store) {
+                const msg = await global.store.loadMessage(key.remoteJid, key.id);
+                return msg?.message || undefined;
+            }
+            return { conversation: 'Mensagem não encontrada' };
+        }
     });
 
-    // VINCULACIÓN CRÍTICA: Aquí es donde Baileys empieza a guardar el historial en el 'store'
-    global.store.bind(sock.ev);
+    // VINCULAÇÃO CRÍTICA: Conecta os eventos do socket à memória RAM
+    if (global.store) global.store.bind(sock.ev);
 
     sock.ev.on('creds.update', saveCreds);
 
@@ -50,10 +63,10 @@ async function iniciarBot() {
         const { connection, qr } = update;
         if (qr) qrcode.generate(qr, { small: true });
         if (connection === 'close') {
-            console.log('[INFO] Conexión cerrada. Reconectando...');
+            console.log('[INFO] Conexão fechada. Reconectando...');
             iniciarBot();
         } else if (connection === 'open') {
-            console.log(`[INFO] ¡Conectado! (${plugins.length} plugins cargados)`);
+            console.log(`[INFO] Conectado! (${plugins.length} plugins carregados)`);
         }
     });
 
@@ -84,7 +97,7 @@ async function iniciarBot() {
                     await plugin.execute(ctx);
                     global.db.write();
                 } catch (err) {
-                    console.error(`Error en plugin ${plugin.name}:`, err);
+                    console.error(`Erro no plugin ${plugin.name}:`, err);
                 }
                 break;
             }
