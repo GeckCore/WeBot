@@ -32,6 +32,10 @@ const adapter = new FileSync('database.json');
 global.db = low(adapter);
 global.db.defaults({ users: {}, chats: {}, settings: {} }).write();
 
+// --- CACHÉ DE MEDIOS (Solución al error .get) ---
+// Definimos global.mediaCache para que los plugins que lo usan no den error
+global.mediaCache = new Map();
+
 // --- IMPLEMENTACIÓN DEL STORE (Basada en tu código) ---
 function customInMemoryStore() {
     let messages = {};
@@ -56,6 +60,9 @@ function customInMemoryStore() {
         jid = jidNormalizedUser(jid);
         if (!(jid in messages)) messages[jid] = [];
         
+        // Guardamos en la caché rápida para el comando .read/.ver
+        global.mediaCache.set(message.key.id, message);
+        
         // Limpieza de metadatos pesados para optimizar RAM
         if (message.message) {
             delete message.message.messageContextInfo;
@@ -70,8 +77,14 @@ function customInMemoryStore() {
             else messages[jid].unshift(message);
         }
         
-        // Limitar a 200 mensajes por chat para no explotar la RAM del VPS
-        if (messages[jid].length > 200) messages[jid].shift();
+        // Limitar a 500 mensajes por chat para un uso personal fluido
+        if (messages[jid].length > 500) messages[jid].shift();
+        
+        // Auto-limpieza de la caché rápida cada hora para no saturar la RAM
+        if (global.mediaCache.size > 2000) {
+            const keys = Array.from(global.mediaCache.keys());
+            for (let i = 0; i < 500; i++) global.mediaCache.delete(keys[i]);
+        }
     }
 
     function bind(conn) {
@@ -85,7 +98,6 @@ function customInMemoryStore() {
             }
         });
         
-        // Manejo de actualizaciones (reacciones, estados, etc)
         conn.ev.on('messages.update', updates => {
             for (const { key, update } of updates) {
                 const jid = jidNormalizedUser(key.remoteJid);
