@@ -7,7 +7,7 @@ import { fileTypeFromBuffer } from 'file-type';
 export default {
     name: 'remini_hd',
     // Soporta .remini, .hd y .enhance
-    match: (text) => /^\(|hd|enhance)$/i.test(text),
+    match: (text) => /^\.(remini|hd|enhance)$/i.test(text),
 
     execute: async ({ sock, remitente, msg, downloadContentFromMessage }) => {
         // 1. Obtener idioma y traducciones
