@@ -32,11 +32,65 @@ const adapter = new FileSync('database.json');
 global.db = low(adapter);
 global.db.defaults({ users: {}, chats: {}, settings: {} }).write();
 
-// --- CACHÉ DE MEDIOS (Solución al error .get) ---
-// Definimos global.mediaCache para que los plugins que lo usan no den error
-global.mediaCache = new Map();
+// ─────────────────────────────────────────────────────────────────────────────
+// CACHÉ PERSISTENTE DE MENSAJES
+// Guarda los objetos de mensaje en disco para sobrevivir reinicios del bot.
+// Solo guardamos la estructura del mensaje (llaves + metadatos), NO los bytes
+// del media. WhatsApp permite re-descargar el media usando esas llaves mientras
+// la URL del CDN esté vigente (generalmente varias semanas).
+// ─────────────────────────────────────────────────────────────────────────────
+const MSG_STORE_FILE = path.join(__dirname, 'mediaMessageStore.json');
+const MSG_STORE_LIMIT = 1500; // máx. mensajes persistidos
+let _msgStoreDirty = false;
+let _msgStoreSaveTimer = null;
 
-// --- IMPLEMENTACIÓN DEL STORE (Basada en tu código) ---
+/**
+ * Carga el store persistente desde disco y rellena global.mediaCache.
+ */
+function loadPersistentMsgStore() {
+    try {
+        if (fs.existsSync(MSG_STORE_FILE)) {
+            const raw = fs.readFileSync(MSG_STORE_FILE, 'utf8');
+            const entries = JSON.parse(raw); // [{ id, msg }]
+            for (const { id, msg } of entries) {
+                if (id && msg) global.mediaCache.set(id, msg);
+            }
+            console.log(`[STORE] ✅ ${global.mediaCache.size} mensajes cargados desde disco.`);
+        }
+    } catch (e) {
+        console.error('[STORE] ❌ No se pudo cargar mediaMessageStore.json:', e.message);
+    }
+}
+
+/**
+ * Escribe global.mediaCache al disco (debounced 5 s para no saturar I/O).
+ */
+function scheduleMsgStoreSave() {
+    _msgStoreDirty = true;
+    if (_msgStoreSaveTimer) return;
+    _msgStoreSaveTimer = setTimeout(() => {
+        _msgStoreSaveTimer = null;
+        if (!_msgStoreDirty) return;
+        try {
+            const entries = [];
+            for (const [id, msg] of global.mediaCache.entries()) {
+                entries.push({ id, msg });
+            }
+            fs.writeFileSync(MSG_STORE_FILE, JSON.stringify(entries));
+            _msgStoreDirty = false;
+        } catch (e) {
+            console.error('[STORE] ❌ Error guardando mediaMessageStore.json:', e.message);
+        }
+    }, 5000);
+}
+
+// Inicializar caché antes del store
+global.mediaCache = new Map();
+loadPersistentMsgStore();
+
+// ─────────────────────────────────────────────────────────────────────────────
+// IMPLEMENTACIÓN DEL STORE EN MEMORIA
+// ─────────────────────────────────────────────────────────────────────────────
 function customInMemoryStore() {
     let messages = {};
     let chats = {};
@@ -49,42 +103,54 @@ function customInMemoryStore() {
             const messageFind = Object.entries(messages).find(([, msgs]) => msgs.find(filter));
             message = messageFind?.[1]?.find(filter);
         } else {
-            jid = jidNormalizedUser(jid);
-            if (!(jid in messages)) return null;
-            message = messages[jid]?.find(m => m.key.id == id);
+            const normalJid = jidNormalizedUser(jid);
+            if (!(normalJid in messages)) return null;
+            message = messages[normalJid]?.find(m => m.key.id == id);
         }
         return message || null;
     }
 
     function upsertMessage(jid, message, type = 'append') {
-        jid = jidNormalizedUser(jid);
-        if (!(jid in messages)) messages[jid] = [];
-        
-        // Guardamos en la caché rápida para el comando .read/.ver
-        global.mediaCache.set(message.key.id, message);
-        
+        const normalJid = jidNormalizedUser(jid);
+        if (!(normalJid in messages)) messages[normalJid] = [];
+
+        // ── Guardar en caché rápida para viewonce / .ver ──────────────────
+        const msgId = message.key?.id;
+        if (msgId) {
+            global.mediaCache.set(msgId, message);
+
+            // Autolimpieza RAM: borrar los 500 más antiguos cuando hay >2000
+            if (global.mediaCache.size > 2000) {
+                const keys = Array.from(global.mediaCache.keys());
+                for (let i = 0; i < 500; i++) global.mediaCache.delete(keys[i]);
+            }
+
+            // Persistir al disco (debounced)
+            scheduleMsgStoreSave();
+
+            // Mantener el archivo en disco acotado a MSG_STORE_LIMIT entradas
+            if (global.mediaCache.size > MSG_STORE_LIMIT) {
+                const oldest = Array.from(global.mediaCache.keys()).slice(0, global.mediaCache.size - MSG_STORE_LIMIT);
+                for (const k of oldest) global.mediaCache.delete(k);
+            }
+        }
+
         // Limpieza de metadatos pesados para optimizar RAM
         if (message.message) {
             delete message.message.messageContextInfo;
             delete message.message.senderKeyDistributionMessage;
         }
 
-        const msg = loadMessage(jid, message.key.id);
-        if (msg) {
-            Object.assign(msg, message);
+        const existing = loadMessage(normalJid, msgId);
+        if (existing) {
+            Object.assign(existing, message);
         } else {
-            if (type === 'append') messages[jid].push(message);
-            else messages[jid].unshift(message);
+            if (type === 'append') messages[normalJid].push(message);
+            else messages[normalJid].unshift(message);
         }
-        
-        // Limitar a 500 mensajes por chat para un uso personal fluido
-        if (messages[jid].length > 500) messages[jid].shift();
-        
-        // Auto-limpieza de la caché rápida cada hora para no saturar la RAM
-        if (global.mediaCache.size > 2000) {
-            const keys = Array.from(global.mediaCache.keys());
-            for (let i = 0; i < 500; i++) global.mediaCache.delete(keys[i]);
-        }
+
+        // Limitar a 500 mensajes por chat
+        if (messages[normalJid].length > 500) messages[normalJid].shift();
     }
 
     function bind(conn) {
@@ -97,7 +163,7 @@ function customInMemoryStore() {
                 }
             }
         });
-        
+
         conn.ev.on('messages.update', updates => {
             for (const { key, update } of updates) {
                 const jid = jidNormalizedUser(key.remoteJid);
@@ -112,7 +178,9 @@ function customInMemoryStore() {
 
 global.store = customInMemoryStore();
 
-// --- GESTIÓN DE BINARIOS ---
+// ─────────────────────────────────────────────────────────────────────────────
+// GESTIÓN DE BINARIOS
+// ─────────────────────────────────────────────────────────────────────────────
 const isWindows = process.platform === 'win32';
 const binarios = ['yt-dlp', 'ffmpeg'];
 binarios.forEach(bin => {
@@ -123,7 +191,9 @@ binarios.forEach(bin => {
     }
 });
 
-// --- CARGA DE PLUGINS ---
+// ─────────────────────────────────────────────────────────────────────────────
+// CARGA DE PLUGINS
+// ─────────────────────────────────────────────────────────────────────────────
 const pluginsDir = path.join(__dirname, 'plugins');
 if (!fs.existsSync(pluginsDir)) fs.mkdirSync(pluginsDir);
 const plugins = fs.readdirSync(pluginsDir)
@@ -133,6 +203,9 @@ const plugins = fs.readdirSync(pluginsDir)
         catch (e) { console.error(`[ERROR] Plugin ${f}:`, e.message); return null; }
     }).filter(p => p !== null);
 
+// ─────────────────────────────────────────────────────────────────────────────
+// INICIO DEL BOT
+// ─────────────────────────────────────────────────────────────────────────────
 async function iniciarBot() {
     const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
     const { version } = await fetchLatestBaileysVersion();
@@ -143,12 +216,17 @@ async function iniciarBot() {
         printQRInTerminal: false,
         browser: ['TheMystic-Bot', 'Chrome', '122.0.0.0'],
         syncFullHistory: false,
+        // Permite que Baileys re-solicite mensajes que no están en el store
         getMessage: async (key) => {
+            // Buscar primero en caché rápida
+            const cached = global.mediaCache.get(key.id);
+            if (cached?.message) return cached.message;
+            // Luego en el store por JID
             return global.store.loadMessage(key.remoteJid, key.id)?.message || undefined;
         }
     });
 
-    // Vinculamos nuestro Store manual
+    // Vincular el store al socket
     global.store.bind(sock);
 
     sock.ev.on('creds.update', saveCreds);
@@ -166,26 +244,24 @@ async function iniciarBot() {
 
         global.db.data = global.db.getState();
         const remitente = msg.key.remoteJid;
-        
-        // Extraemos contenido ignorando capas de efímero/viewonce para detectar el comando
+
         const messageContent = extractMessageContent(msg.message);
-        const texto = messageContent?.conversation || 
-                      messageContent?.extendedTextMessage?.text || 
-                      messageContent?.imageMessage?.caption || 
-                      messageContent?.videoMessage?.caption || "";
-        
+        const texto = messageContent?.conversation ||
+                      messageContent?.extendedTextMessage?.text ||
+                      messageContent?.imageMessage?.caption ||
+                      messageContent?.videoMessage?.caption || '';
+
         const textoLimpio = texto.trim();
         const quoted = messageContent?.extendedTextMessage?.contextInfo?.quotedMessage;
 
-        // Contexto para plugins
-        const ctx = { 
-            sock, 
-            msg, 
-            remitente, 
-            textoLimpio, 
-            downloadContentFromMessage, 
+        const ctx = {
+            sock,
+            msg,
+            remitente,
+            textoLimpio,
+            downloadContentFromMessage,
             extractMessageContent,
-            quoted 
+            quoted
         };
 
         for (const plugin of plugins) {
