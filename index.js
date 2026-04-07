@@ -33,38 +33,35 @@ global.db = low(adapter);
 global.db.defaults({ users: {}, chats: {}, settings: {} }).write();
 
 // ─────────────────────────────────────────────────────────────────────────────
-// CACHÉ PERSISTENTE DE MENSAJES
-// Guarda los objetos de mensaje en disco para sobrevivir reinicios del bot.
-// Solo guardamos la estructura del mensaje (llaves + metadatos), NO los bytes
-// del media. WhatsApp permite re-descargar el media usando esas llaves mientras
-// la URL del CDN esté vigente (generalmente varias semanas).
+// CACHÉ PERSISTENTE DE MENSAJES (CORREGIDO PARA BUFFERS)
 // ─────────────────────────────────────────────────────────────────────────────
 const MSG_STORE_FILE = path.join(__dirname, 'mediaMessageStore.json');
-const MSG_STORE_LIMIT = 1500; // máx. mensajes persistidos
+const MSG_STORE_LIMIT = 1500;
 let _msgStoreDirty = false;
 let _msgStoreSaveTimer = null;
 
-/**
- * Carga el store persistente desde disco y rellena global.mediaCache.
- */
 function loadPersistentMsgStore() {
     try {
         if (fs.existsSync(MSG_STORE_FILE)) {
             const raw = fs.readFileSync(MSG_STORE_FILE, 'utf8');
-            const entries = JSON.parse(raw); // [{ id, msg }]
+            // FIX: Revivir los Buffers destruidos por el JSON.stringify
+            const reviver = (k, v) => {
+                if (v && v.type === 'Buffer' && Array.isArray(v.data)) {
+                    return Buffer.from(v.data);
+                }
+                return v;
+            };
+            const entries = JSON.parse(raw, reviver);
             for (const { id, msg } of entries) {
                 if (id && msg) global.mediaCache.set(id, msg);
             }
-            console.log(`[STORE] ✅ ${global.mediaCache.size} mensajes cargados desde disco.`);
+            console.log(`[STORE] ✅ ${global.mediaCache.size} mensajes cargados desde disco con llaves intactas.`);
         }
     } catch (e) {
         console.error('[STORE] ❌ No se pudo cargar mediaMessageStore.json:', e.message);
     }
 }
 
-/**
- * Escribe global.mediaCache al disco (debounced 5 s para no saturar I/O).
- */
 function scheduleMsgStoreSave() {
     _msgStoreDirty = true;
     if (_msgStoreSaveTimer) return;
@@ -84,7 +81,6 @@ function scheduleMsgStoreSave() {
     }, 5000);
 }
 
-// Inicializar caché antes del store
 global.mediaCache = new Map();
 loadPersistentMsgStore();
 
@@ -114,28 +110,25 @@ function customInMemoryStore() {
         const normalJid = jidNormalizedUser(jid);
         if (!(normalJid in messages)) messages[normalJid] = [];
 
-        // ── Guardar en caché rápida para viewonce / .ver ──────────────────
         const msgId = message.key?.id;
         if (msgId) {
-            global.mediaCache.set(msgId, message);
+            // FIX CRÍTICO: cloneDeep separa la copia en RAM del objeto procesado por Baileys.
+            // Si WhatsApp purga el mensaje original, nuestra RAM no se ve afectada.
+            global.mediaCache.set(msgId, lodash.cloneDeep(message));
 
-            // Autolimpieza RAM: borrar los 500 más antiguos cuando hay >2000
             if (global.mediaCache.size > 2000) {
                 const keys = Array.from(global.mediaCache.keys());
                 for (let i = 0; i < 500; i++) global.mediaCache.delete(keys[i]);
             }
 
-            // Persistir al disco (debounced)
             scheduleMsgStoreSave();
 
-            // Mantener el archivo en disco acotado a MSG_STORE_LIMIT entradas
             if (global.mediaCache.size > MSG_STORE_LIMIT) {
                 const oldest = Array.from(global.mediaCache.keys()).slice(0, global.mediaCache.size - MSG_STORE_LIMIT);
                 for (const k of oldest) global.mediaCache.delete(k);
             }
         }
 
-        // Limpieza de metadatos pesados para optimizar RAM
         if (message.message) {
             delete message.message.messageContextInfo;
             delete message.message.senderKeyDistributionMessage;
@@ -149,7 +142,6 @@ function customInMemoryStore() {
             else messages[normalJid].unshift(message);
         }
 
-        // Limitar a 500 mensajes por chat
         if (messages[normalJid].length > 500) messages[normalJid].shift();
     }
 
@@ -216,17 +208,13 @@ async function iniciarBot() {
         printQRInTerminal: false,
         browser: ['TheMystic-Bot', 'Chrome', '122.0.0.0'],
         syncFullHistory: false,
-        // Permite que Baileys re-solicite mensajes que no están en el store
         getMessage: async (key) => {
-            // Buscar primero en caché rápida
             const cached = global.mediaCache.get(key.id);
             if (cached?.message) return cached.message;
-            // Luego en el store por JID
             return global.store.loadMessage(key.remoteJid, key.id)?.message || undefined;
         }
     });
 
-    // Vincular el store al socket
     global.store.bind(sock);
 
     sock.ev.on('creds.update', saveCreds);
@@ -235,7 +223,7 @@ async function iniciarBot() {
         const { connection, qr } = update;
         if (qr) qrcode.generate(qr, { small: true });
         if (connection === 'close') iniciarBot();
-        else if (connection === 'open') console.log(`[INFO] Bot Online (${plugins.length} plugins).`);
+        else if (connection === 'open') console.log(`[INFO] Bot Online (${plugins.length} plugins activos).`);
     });
 
     sock.ev.on('messages.upsert', async (m) => {
