@@ -3,19 +3,31 @@ const qrcode = require('qrcode-terminal');
 const fs = require('fs');
 const path = require('path');
 
-// --- BANCO DE DADOS (Níveis, Warns, etc) ---
+// --- BASE DE DATOS ---
 const low = require('lowdb');
 const FileSync = require('lowdb/adapters/FileSync');
 const adapter = new FileSync('database.json');
 global.db = low(adapter);
 global.db.defaults({ users: {}, chats: {}, settings: {} }).write();
 
-// --- ARMAZENAMENTO NA MEMÓRIA (Método The Mystic Seguro) ---
-// Inicializamos sem logger externo para evitar crashes de MODULE_NOT_FOUND
-global.store = makeInMemoryStore({});
+// --- LOGGER FALSO (El Bypass para Baileys) ---
+// Engaña a makeInMemoryStore para que se inicialice sin requerir librerías externas
+const dummyLogger = {
+    level: 'silent',
+    trace: () => {},
+    debug: () => {},
+    info: () => {},
+    warn: () => {},
+    error: () => {},
+    fatal: () => {},
+    child: function() { return this; }
+};
+
+// --- ALMACENAMIENTO EN MEMORIA (Método The Mystic) ---
+global.store = makeInMemoryStore({ logger: dummyLogger });
 global.store.readFromFile('./baileys_store.json');
 
-// Auto-salvamento a cada 10 segundos
+// Auto-salvado cada 10 segundos
 setInterval(() => {
     if (global.store) global.store.writeToFile('./baileys_store.json');
 }, 10_000);
@@ -44,18 +56,17 @@ async function iniciarBot() {
         printQRInTerminal: false,
         browser: ['TheMystic-Bot-MD', 'Safari', '2.0.0'], 
         syncFullHistory: false,
-        // Interceptador nativo para reconstruir mensagens perdidas
         getMessage: async (key) => {
             if (global.store) {
                 const msg = await global.store.loadMessage(key.remoteJid, key.id);
                 return msg?.message || undefined;
             }
-            return { conversation: 'Mensagem não encontrada' };
+            return { conversation: 'Mensaje no encontrado' };
         }
     });
 
-    // VINCULAÇÃO CRÍTICA: Conecta os eventos do socket à memória RAM
-    if (global.store) global.store.bind(sock.ev);
+    // VINCULACIÓN CRÍTICA: Ya no dará error porque el store está forzado a existir
+    global.store.bind(sock.ev);
 
     sock.ev.on('creds.update', saveCreds);
 
@@ -63,10 +74,10 @@ async function iniciarBot() {
         const { connection, qr } = update;
         if (qr) qrcode.generate(qr, { small: true });
         if (connection === 'close') {
-            console.log('[INFO] Conexão fechada. Reconectando...');
+            console.log('[INFO] Conexión cerrada. Reconectando...');
             iniciarBot();
         } else if (connection === 'open') {
-            console.log(`[INFO] Conectado! (${plugins.length} plugins carregados)`);
+            console.log(`[INFO] ¡Conectado! (${plugins.length} plugins cargados)`);
         }
     });
 
@@ -97,7 +108,7 @@ async function iniciarBot() {
                     await plugin.execute(ctx);
                     global.db.write();
                 } catch (err) {
-                    console.error(`Erro no plugin ${plugin.name}:`, err);
+                    console.error(`Error en plugin ${plugin.name}:`, err);
                 }
                 break;
             }
