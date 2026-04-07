@@ -1,25 +1,11 @@
 const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
 
-// Utilidad matemática: Reconstruye los Buffers (llaves) destruidos al guardarse en JSON
-function restoreBuffers(obj) {
-    if (obj === null || typeof obj !== 'object') return obj;
-    if (obj.type === 'Buffer' && Array.isArray(obj.data)) {
-        return Buffer.from(obj.data);
-    }
-    if (Array.isArray(obj)) {
-        return obj.map(restoreBuffers);
-    }
-    for (let key in obj) {
-        obj[key] = restoreBuffers(obj[key]);
-    }
-    return obj;
-}
-
 module.exports = {
-    name: 'ver_efimero_pro',
+    name: 'ver_efimero',
     match: (text) => /^\.(ver|read|revelar)$/i.test(text),
 
     execute: async ({ sock, remitente, msg }) => {
+        // 1. Identificar el ID del mensaje al que respondes
         const targetId = msg.message?.extendedTextMessage?.contextInfo?.stanzaId;
 
         if (!targetId) {
@@ -28,31 +14,33 @@ module.exports = {
             }, { quoted: msg });
         }
 
-        // 1. Buscar primero en RAM (Velocidad máxima)
-        let originalMsg = global.mediaCache.get(targetId);
-
-        // 2. Si se reinició el bot, buscar en la Base de Datos JSON
-        if (!originalMsg) {
-            const dbMsg = global.db.data.viewonce?.[targetId];
-            if (dbMsg) {
-                // Clonamos y reconstruimos las llaves criptográficas
-                originalMsg = restoreBuffers(JSON.parse(JSON.stringify(dbMsg)));
-            }
+        if (!global.store) {
+            return await sock.sendMessage(remitente, { text: '❌ Error: El sistema de almacenamiento en memoria no está activo.' });
         }
 
-        if (!originalMsg) {
+        // 2. Extraer el mensaje original de la RAM (Método oficial de Baileys/Mystic)
+        let originalMsg;
+        try {
+            originalMsg = await global.store.loadMessage(remitente, targetId);
+        } catch (e) {
+            console.error('Fallo al buscar en el store:', e);
+        }
+
+        if (!originalMsg || !originalMsg.message) {
             return await sock.sendMessage(remitente, { 
-                text: '❌ *Error:* El mensaje no existe en la base de datos de intercepción.' 
+                text: '❌ *Error:* El mensaje no está en la memoria. Ocurre si el bot se reinició después de que enviaran la foto.' 
             }, { quoted: msg });
         }
 
-        // 3. Aplanar la estructura de Baileys
-        let content = originalMsg;
+        // 3. Aplanar el mensaje (Desempaquetar la estructura de Baileys)
+        let content = originalMsg.message;
         if (content.ephemeralMessage) content = content.ephemeralMessage.message;
         if (content.viewOnceMessage) content = content.viewOnceMessage.message;
         if (content.viewOnceMessageV2) content = content.viewOnceMessageV2.message;
         if (content.viewOnceMessageV2Extension) content = content.viewOnceMessageV2Extension.message;
+        if (content.documentWithCaptionMessage) content = content.documentWithCaptionMessage.message;
 
+        // 4. Buscar el nodo multimedia
         const mediaTypeObj = Object.keys(content).find(k => k.endsWith('Message'));
         
         if (!mediaTypeObj) {
@@ -65,14 +53,14 @@ module.exports = {
         await sock.sendMessage(remitente, { text: '⏳ *Desencriptando...*' }, { quoted: msg });
 
         try {
-            // 4. Descargar usando la mediaKey interceptada
+            // 5. Descargar usando la mediaKey preservada en la memoria
             const stream = await downloadContentFromMessage(mediaMsg, mediaType);
             let buffer = Buffer.from([]);
             for await (const chunk of stream) {
                 buffer = Buffer.concat([buffer, chunk]);
             }
 
-            // 5. Enviar el resultado
+            // 6. Enviar
             if (mediaType === 'video') {
                 await sock.sendMessage(remitente, { video: buffer, caption: '👁️ *Revelado*' }, { quoted: msg });
             } else if (mediaType === 'image') {
@@ -84,7 +72,7 @@ module.exports = {
         } catch (err) {
             console.error('Error desencriptando:', err.message);
             await sock.sendMessage(remitente, { 
-                text: '❌ *Error de Descarga:* La llave es correcta pero Meta ya borró el archivo de sus servidores.' 
+                text: '❌ *Fallo técnico:* No se pudo descargar el archivo. Es probable que la llave criptográfica haya expirado.' 
             }, { quoted: msg });
         }
     }
