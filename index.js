@@ -1,48 +1,106 @@
-// --- IMPORTACIÓN SEGURA Y ROBUSTA (Bypass ESM/CommonJS) ---
 const baileysModule = require('@whiskeysockets/baileys');
 
-// Función para extraer funciones independientemente de cómo esté empaquetado el módulo
-const getBaileysFunction = (name) => {
-    if (baileysModule[name]) return baileysModule[name];
-    if (baileysModule.default && baileysModule.default[name]) return baileysModule.default[name];
-    if (baileysModule.default && baileysModule.default.default && baileysModule.default.default[name]) return baileysModule.default.default[name];
-    return undefined;
+// --- EXTRACCIÓN DE FUNCIONES BAILEYS ---
+const findBaileysFunction = (name) => {
+    const search = (obj, target, depth = 0) => {
+        if (!obj || depth > 3) return undefined;
+        if (typeof obj[target] === 'function') return obj[target];
+        if (obj.default) return search(obj.default, target, depth + 1);
+        return undefined;
+    };
+    return search(baileysModule, name);
 };
 
-const makeWASocket = getBaileysFunction('makeWASocket');
-const useMultiFileAuthState = getBaileysFunction('useMultiFileAuthState');
-const fetchLatestBaileysVersion = getBaileysFunction('fetchLatestBaileysVersion');
-const downloadContentFromMessage = getBaileysFunction('downloadContentFromMessage');
-const makeInMemoryStore = getBaileysFunction('makeInMemoryStore');
-const jidNormalizedUser = getBaileysFunction('jidNormalizedUser');
+const makeWASocket = findBaileysFunction('makeWASocket') || baileysModule.default;
+const useMultiFileAuthState = findBaileysFunction('useMultiFileAuthState');
+const fetchLatestBaileysVersion = findBaileysFunction('fetchLatestBaileysVersion');
+const downloadContentFromMessage = findBaileysFunction('downloadContentFromMessage');
+const jidNormalizedUser = findBaileysFunction('jidNormalizedUser');
+const extractMessageContent = findBaileysFunction('extractMessageContent');
+const { proto, isJidBroadcast } = baileysModule;
 
 const qrcode = require('qrcode-terminal');
 const fs = require('fs');
 const path = require('path');
 const pino = require('pino');
+const lodash = require('lodash');
 
-// --- BASE DE DATOS ---
+// --- BASE DE DATOS (LowDB) ---
 const low = require('lowdb');
 const FileSync = require('lowdb/adapters/FileSync');
 const adapter = new FileSync('database.json');
 global.db = low(adapter);
 global.db.defaults({ users: {}, chats: {}, settings: {} }).write();
 
-// --- ALMACENAMIENTO NATIVO (Método The Mystic) ---
-// Verificación de seguridad antes de inicializar
-if (typeof makeInMemoryStore !== 'function') {
-    console.error('[CRÍTICO] No se pudo cargar makeInMemoryStore de Baileys. Revisa la instalación.');
-    process.exit(1);
+// --- IMPLEMENTACIÓN DEL STORE (Basada en tu código) ---
+function customInMemoryStore() {
+    let messages = {};
+    let chats = {};
+
+    function loadMessage(jid, id = null) {
+        let message = null;
+        if (jid && !id) {
+            id = jid;
+            const filter = m => m.key?.id == id;
+            const messageFind = Object.entries(messages).find(([, msgs]) => msgs.find(filter));
+            message = messageFind?.[1]?.find(filter);
+        } else {
+            jid = jidNormalizedUser(jid);
+            if (!(jid in messages)) return null;
+            message = messages[jid]?.find(m => m.key.id == id);
+        }
+        return message || null;
+    }
+
+    function upsertMessage(jid, message, type = 'append') {
+        jid = jidNormalizedUser(jid);
+        if (!(jid in messages)) messages[jid] = [];
+        
+        // Limpieza de metadatos pesados para optimizar RAM
+        if (message.message) {
+            delete message.message.messageContextInfo;
+            delete message.message.senderKeyDistributionMessage;
+        }
+
+        const msg = loadMessage(jid, message.key.id);
+        if (msg) {
+            Object.assign(msg, message);
+        } else {
+            if (type === 'append') messages[jid].push(message);
+            else messages[jid].unshift(message);
+        }
+        
+        // Limitar a 200 mensajes por chat para no explotar la RAM del VPS
+        if (messages[jid].length > 200) messages[jid].shift();
+    }
+
+    function bind(conn) {
+        conn.ev.on('messages.upsert', ({ messages: newMessages, type }) => {
+            if (['append', 'notify'].includes(type)) {
+                for (const msg of newMessages) {
+                    const jid = jidNormalizedUser(msg.key.remoteJid);
+                    if (!jid || isJidBroadcast(jid)) continue;
+                    upsertMessage(jid, msg, type);
+                }
+            }
+        });
+        
+        // Manejo de actualizaciones (reacciones, estados, etc)
+        conn.ev.on('messages.update', updates => {
+            for (const { key, update } of updates) {
+                const jid = jidNormalizedUser(key.remoteJid);
+                const message = loadMessage(jid, key.id);
+                if (message) Object.assign(message, update);
+            }
+        });
+    }
+
+    return { bind, loadMessage, messages, chats };
 }
 
-global.store = makeInMemoryStore({ logger: pino({ level: 'silent' }) });
-global.store.readFromFile('./baileys_store.json');
+global.store = customInMemoryStore();
 
-// Guardado automático cada 10 segundos
-setInterval(() => {
-    if (global.store) global.store.writeToFile('./baileys_store.json');
-}, 10000);
-
+// --- GESTIÓN DE BINARIOS ---
 const isWindows = process.platform === 'win32';
 const binarios = ['yt-dlp', 'ffmpeg'];
 binarios.forEach(bin => {
@@ -53,9 +111,15 @@ binarios.forEach(bin => {
     }
 });
 
+// --- CARGA DE PLUGINS ---
 const pluginsDir = path.join(__dirname, 'plugins');
 if (!fs.existsSync(pluginsDir)) fs.mkdirSync(pluginsDir);
-const plugins = fs.readdirSync(pluginsDir).filter(f => f.endsWith('.js')).map(f => require(path.join(pluginsDir, f)));
+const plugins = fs.readdirSync(pluginsDir)
+    .filter(f => f.endsWith('.js'))
+    .map(f => {
+        try { return require(path.join(pluginsDir, f)); }
+        catch (e) { console.error(`[ERROR] Plugin ${f}:`, e.message); return null; }
+    }).filter(p => p !== null);
 
 async function iniciarBot() {
     const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
@@ -65,58 +129,52 @@ async function iniciarBot() {
         version,
         auth: state,
         printQRInTerminal: false,
-        browser: ['Bot-Privado', 'Chrome', '122.0.0.0'],
+        browser: ['TheMystic-Bot', 'Chrome', '122.0.0.0'],
         syncFullHistory: false,
         getMessage: async (key) => {
-            if (global.store) {
-                const jid = jidNormalizedUser(key.remoteJid);
-                const msg = await global.store.loadMessage(jid, key.id);
-                return msg?.message || undefined;
-            }
-            return { conversation: 'Mensaje no encontrado' };
+            return global.store.loadMessage(key.remoteJid, key.id)?.message || undefined;
         }
     });
 
-    // VINCULACIÓN CRÍTICA (Como en main.js)
-    if (global.store) global.store.bind(sock.ev);
+    // Vinculamos nuestro Store manual
+    global.store.bind(sock);
 
     sock.ev.on('creds.update', saveCreds);
 
     sock.ev.on('connection.update', (update) => {
         const { connection, qr } = update;
         if (qr) qrcode.generate(qr, { small: true });
-        if (connection === 'close') {
-            console.log('[INFO] Conexión cerrada. Reconectando...');
-            iniciarBot();
-        } else if (connection === 'open') {
-            console.log(`[INFO] ¡Conectado! (${plugins.length} plugins cargados)`);
-        }
+        if (connection === 'close') iniciarBot();
+        else if (connection === 'open') console.log(`[INFO] Bot Online (${plugins.length} plugins).`);
     });
-
-    const getMediaInfo = (msgObj) => {
-        if (!msgObj) return null;
-        if (msgObj.videoMessage) return { type: 'video', msg: msgObj.videoMessage, ext: 'mp4' };
-        if (msgObj.imageMessage) return { type: 'image', msg: msgObj.imageMessage, ext: 'jpg' };
-        if (msgObj.audioMessage) return { type: 'audio', msg: msgObj.audioMessage, ext: 'ogg' };
-        return null;
-    };
 
     sock.ev.on('messages.upsert', async (m) => {
         const msg = m.messages[0];
         if (!msg.message || msg.key.remoteJid === 'status@broadcast') return;
 
         global.db.data = global.db.getState();
-
         const remitente = msg.key.remoteJid;
-        const texto = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
+        
+        // Extraemos contenido ignorando capas de efímero/viewonce para detectar el comando
+        const messageContent = extractMessageContent(msg.message);
+        const texto = messageContent?.conversation || 
+                      messageContent?.extendedTextMessage?.text || 
+                      messageContent?.imageMessage?.caption || 
+                      messageContent?.videoMessage?.caption || "";
+        
         const textoLimpio = texto.trim();
-        const quoted = msg.message.extendedTextMessage?.contextInfo?.quotedMessage;
+        const quoted = messageContent?.extendedTextMessage?.contextInfo?.quotedMessage;
 
-        // El filtro ya no bloqueará los ViewOnce
-        const msgType = Object.keys(msg.message)[0];
-        if (!textoLimpio && !['videoMessage', 'imageMessage', 'audioMessage', 'documentMessage', 'viewOnceMessage', 'viewOnceMessageV2', 'viewOnceMessageV2Extension'].includes(msgType)) return;
-
-        const ctx = { sock, msg, remitente, textoLimpio, getMediaInfo, downloadContentFromMessage, quoted };
+        // Contexto para plugins
+        const ctx = { 
+            sock, 
+            msg, 
+            remitente, 
+            textoLimpio, 
+            downloadContentFromMessage, 
+            extractMessageContent,
+            quoted 
+        };
 
         for (const plugin of plugins) {
             if (plugin.match(textoLimpio, ctx)) {
@@ -124,7 +182,7 @@ async function iniciarBot() {
                     await plugin.execute(ctx);
                     global.db.write();
                 } catch (err) {
-                    console.error(`Error en plugin ${plugin.name}:`, err);
+                    console.error(`Error en plugin [${plugin.name}]:`, err);
                 }
                 break;
             }
