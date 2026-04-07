@@ -4,7 +4,7 @@
  * specifically the @whiskeysockets/baileys version, to handle events, manage chats, 
  * groups, contacts, and presence updates for WhatsApp clients. 
  */
-const { BufferJSON, proto, isJidBroadcast, WAMessageStubType, updateMessageWithReceipt, updateMessageWithReaction, jidNormalizedUser } = (await import('baileys')).default;
+const { proto, isJidBroadcast, WAMessageStubType, updateMessageWithReceipt, updateMessageWithReaction, jidNormalizedUser } = (await import('baileys')).default;
 
 const TIME_TO_DATA_STALE = 5 * 60 * 1000;
 const MAX_MESSAGES_PER_CHAT = 1500;
@@ -16,6 +16,22 @@ function makeInMemoryStore() {
 
     function getJid(jid) {
         return jid?.decodeJid?.() || jidNormalizedUser(jid) || jid;
+    }
+
+    // Clonación profunda para aislar el mensaje de la purga de RAM del bot
+    function safeClone(obj) {
+        if (obj === null || typeof obj !== 'object') return obj;
+        if (Buffer.isBuffer(obj)) return Buffer.from(obj);
+        if (obj instanceof Uint8Array) return new Uint8Array(obj);
+        if (Array.isArray(obj)) return obj.map(safeClone);
+        
+        const cloned = {};
+        for (const key in obj) {
+            // Ignorar metadatos pesados innecesarios
+            if (key === 'messageContextInfo' || key === 'senderKeyDistributionMessage') continue;
+            cloned[key] = safeClone(obj[key]);
+        }
+        return cloned;
     }
 
     function loadMessage(jid, id = null) {
@@ -53,12 +69,25 @@ function makeInMemoryStore() {
         
         if (msgId) {
             if (!global.mediaCache) global.mediaCache = new Map();
-            global.mediaCache.set(msgId, message);
+            
+            const content = message.message;
+            // Solo clonamos si es efímero o multimedia para no consumir RAM a lo tonto con texto plano
+            const isMediaOrEfimero = content && (
+                content.viewOnceMessage || 
+                content.viewOnceMessageV2 || 
+                content.viewOnceMessageV2Extension || 
+                content.ephemeralMessage || 
+                content.imageMessage || 
+                content.videoMessage || 
+                content.audioMessage
+            );
+
+            if (isMediaOrEfimero) {
+                // Se guarda una copia aislada e independiente en la caché
+                global.mediaCache.set(msgId, safeClone(message));
+            }
         }
 
-        delete message.message?.messageContextInfo;
-        delete message.message?.senderKeyDistributionMessage;
-        
         const msg = loadMessage(jid, msgId);
         if (msg) {
             Object.assign(msg, message);
@@ -66,6 +95,7 @@ function makeInMemoryStore() {
             type === 'append' ? messages[jid].push(message) : messages[jid].unshift(message);
         }
 
+        // Control estructural de RAM para historial
         if (messages[jid].length > MAX_MESSAGES_PER_CHAT) {
             messages[jid].splice(0, messages[jid].length - MAX_MESSAGES_PER_CHAT);
         }
@@ -79,7 +109,6 @@ function makeInMemoryStore() {
                 for (const msg of historyMessages) {
                     const jid = getJid(msg.key.remoteJid);
                     if (!jid || isJidBroadcast(jid)) continue;
-                    // Se inyecta 'msg' directamente, sin proto.WebMessageInfo.fromObject
                     upsertMessage(jid, msg, 'append');
                 }
             }
@@ -90,7 +119,6 @@ function makeInMemoryStore() {
                 for (const msg of newMessages) {
                     const jid = getJid(msg.key.remoteJid);
                     if (!jid || isJidBroadcast(jid)) continue;
-                    // Se inyecta 'msg' directamente, sin proto.WebMessageInfo.fromObject
                     upsertMessage(jid, msg, type);
                 }
             }
@@ -176,7 +204,6 @@ function makeInMemoryStore() {
     function fromJSON(json) {
         Object.assign(chats, json.chats);
         for (const jid in json.messages) {
-            // Aquí se restaura como objeto normal para no perder propiedades tampoco
             messages[jid] = json.messages[jid].map(m => m);
         }
     }
