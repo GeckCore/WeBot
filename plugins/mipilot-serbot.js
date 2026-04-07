@@ -15,18 +15,17 @@ export default {
         const userNumber = userJid.split('@')[0];
         const sessionPath = path.join(process.cwd(), 'jadibts', userNumber);
 
-        // 1. Verificar si ya está conectado
-        const existingConn = global.conns.find(c => c.user?.jid === userJid);
+        // 1. Verificar si ya está conectado en esta instancia
+        const existingConn = global.conns.find(c => c.user && (jidNormalizedUser(c.user.id) === jidNormalizedUser(userJid)));
         if (existingConn) {
-            return sock.sendMessage(remitente, { text: '⚠️ Ya tienes una sesión activa. Usa `.estado` para verificar.' }, { quoted: msg });
+            return sock.sendMessage(remitente, { text: '⚠️ Ya tienes una sesión activa o en proceso de conexión.' }, { quoted: msg });
         }
 
         if (!fs.existsSync(sessionPath)) {
             fs.mkdirSync(sessionPath, { recursive: true });
         }
 
-        // 2. Iniciar proceso de conexión
-        await sock.sendMessage(remitente, { text: '⏳ Iniciando sesión de sub-bot... Espera el código QR.' }, { quoted: msg });
+        await sock.sendMessage(remitente, { text: '⏳ Preparando el entorno de sub-bot... Por favor, espera el QR.' }, { quoted: msg });
 
         async function startSubBot() {
             const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
@@ -39,29 +38,44 @@ export default {
                 printQRInTerminal: false,
                 browser: ['Sub-Bot (VPS)', 'Chrome', '1.0.0'],
                 syncFullHistory: false,
-                getMessage: async (key) => ({ conversation: 'Sub-bot message' })
+                markOnline: false, // Evita conflictos de presencia que causan el error 479
+                defaultQueryTimeoutMs: undefined,
+                getMessage: async (key) => ({ conversation: 'Sub-bot system' })
             });
 
             let qrSent = false;
             let qrMsg = null;
+            let isClosed = false;
 
             subSock.ev.on('creds.update', saveCreds);
 
             subSock.ev.on('connection.update', async (update) => {
                 const { connection, lastDisconnect, qr } = update;
 
-                // --- MANEJO DE QR ---
+                // --- MANEJO DE QR (Sin Sharp) ---
                 if (qr) {
-                    const qrBuffer = await QRCode.toBuffer(qr);
-                    const caption = '🤳 *¡CONVIÉRTETE EN BOT!* 🤳\n\n1. Abre WhatsApp en tu teléfono.\n2. Ve a Dispositivos vinculados > Vincular un dispositivo.\n3. Escanea este código QR.\n\n*Nota:* Este QR caduca en 45 segundos.';
-                    
-                    if (!qrSent) {
-                        qrMsg = await sock.sendMessage(remitente, { image: qrBuffer, caption }, { quoted: msg });
-                        qrSent = true;
-                    } else {
-                        // Actualizar el mensaje anterior si es posible (Baileys no siempre lo permite con imágenes)
-                        // Por simplicidad en esta versión, enviamos uno nuevo si el anterior caduca
-                        await sock.sendMessage(remitente, { image: qrBuffer, caption }, { quoted: msg });
+                    try {
+                        const qrBuffer = await QRCode.toBuffer(qr);
+                        const caption = '🤳 *¡CONVIÉRTETE EN BOT!* 🤳\n\nEscanea este código QR para vincular tu número a la VPS.\n\n*Nota:* Si el código falla, asegúrate de no tener muchas sesiones activas.';
+                        
+                        if (!qrSent) {
+                            // Enviamos con thumbnail vacío para evitar el error de "unsupported image format" de Sharp
+                            qrMsg = await sock.sendMessage(remitente, { 
+                                image: qrBuffer, 
+                                caption,
+                                thumbnail: Buffer.alloc(0) 
+                            }, { quoted: msg });
+                            qrSent = true;
+                        } else {
+                            // Enviar uno nuevo si el anterior caduca
+                            await sock.sendMessage(remitente, { 
+                                image: qrBuffer, 
+                                caption,
+                                thumbnail: Buffer.alloc(0)
+                            }, { quoted: msg });
+                        }
+                    } catch (e) {
+                        console.error('Error al enviar QR:', e);
                     }
                 }
 
@@ -69,10 +83,10 @@ export default {
                 if (connection === 'open') {
                     subSock.isSubBot = true;
                     subSock.uptime = Date.now();
-                    global.conns.push(subSock);
+                    if (!global.conns.includes(subSock)) global.conns.push(subSock);
                     
                     await sock.sendMessage(remitente, { 
-                        text: `✅ *¡Sub-Bot Conectado!*\n\nTu número @${userNumber} ahora es parte del sistema VPS.\nUsa \`.bots\` para ver la lista activa.`,
+                        text: `✅ *Sub-Bot Conectado con éxito.*\n\nNúmero: @${userNumber}\nYa puedes usar los comandos directamente desde tu número.`,
                         mentions: [userJid]
                     });
                     
@@ -80,33 +94,36 @@ export default {
                 }
 
                 if (connection === 'close') {
+                    isClosed = true;
                     const code = lastDisconnect?.error?.output?.statusCode;
-                    const shouldReconnect = code !== 401; // 401 = Logout manual
+                    const reason = lastDisconnect?.error?.output?.payload?.message || 'Desconocida';
+                    
+                    // Si el error es 401 (Unauthorized), es un logout real
+                    const isLogout = code === 401;
 
-                    if (shouldReconnect) {
-                        console.log(`[SUB-BOT] Reconectando sesión de ${userNumber}...`);
-                        startSubBot();
+                    console.log(`[SUB-BOT] Conexión cerrada para ${userNumber}. Razón: ${reason} (${code})`);
+
+                    const index = global.conns.indexOf(subSock);
+                    if (index > -1) global.conns.splice(index, 1);
+
+                    if (!isLogout) {
+                        console.log(`[SUB-BOT] Reintentando conexión para ${userNumber} en 5 segundos...`);
+                        setTimeout(() => startSubBot(), 5000);
                     } else {
-                        console.log(`[SUB-BOT] Sesión cerrada permanentemente para ${userNumber}`);
                         fs.rmSync(sessionPath, { recursive: true, force: true });
-                        const index = global.conns.indexOf(subSock);
-                        if (index > -1) global.conns.splice(index, 1);
-                        
-                        await sock.sendMessage(remitente, { text: '❌ Sesión cerrada. Los archivos temporales han sido eliminados.' });
+                        await sock.sendMessage(remitente, { text: '❌ Sesión cerrada permanentemente. Los archivos de sesión han sido eliminados.' });
                     }
                 }
             });
 
-            // Lógica para procesar mensajes en el sub-bot (opcional)
-            // Aquí podrías replicar el manejador de mensajes del index principal
             subSock.ev.on('messages.upsert', async (m) => {
-                // El sub-bot puede responder comandos propios aquí si lo deseas
+                // Aquí podrías vincular tu manejador principal si quieres que el sub-bot responda comandos
             });
         }
 
         startSubBot().catch(err => {
-            console.error('Error fatal en JadiBot:', err);
-            sock.sendMessage(remitente, { text: '❌ Error al intentar iniciar la sesión.' });
+            console.error('Error en el proceso del Sub-Bot:', err);
+            sock.sendMessage(remitente, { text: '❌ No se pudo iniciar el proceso de vinculación.' });
         });
     }
 };
