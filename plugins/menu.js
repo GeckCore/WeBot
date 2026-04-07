@@ -15,7 +15,7 @@ module.exports = {
         menuText += `*User:* @${remitente.split('@')[0]}\n`;
         menuText += `*Plugins:* ${files.length} cargados\n`;
         menuText += `*Status:* Online\n\n`;
-        menuText += `⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n\n`;
+        menuText += `⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n\n`;
 
         // Mapeo manual de descripciones para que sea objetivo
 const descriptions = {
