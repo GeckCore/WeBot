@@ -10,7 +10,13 @@ const low = require('lowdb');
 const FileSync = require('lowdb/adapters/FileSync');
 const adapter = new FileSync('database.json');
 global.db = low(adapter);
-global.db.defaults({ users: {}, chats: {}, settings: {} }).write();
+
+// Inicialización con el ajuste de grupos por defecto en true (on)
+global.db.defaults({ 
+    users: {}, 
+    chats: {}, 
+    settings: { grupos: true } 
+}).write();
 
 console.log('[INFO] Base de datos JSON cargada y lista.');
 
@@ -38,7 +44,6 @@ async function iniciarBot() {
     plugins = await Promise.all(pluginFiles.map(async (file) => {
         try {
             const fullPath = path.join(pluginsDir, file);
-            // import() dinámico es compatible con CJS y puede cargar ESM con top-level await
             const module = await import(pathToFileURL(fullPath).href);
             return module.default || module;
         } catch (err) {
@@ -94,6 +99,15 @@ async function iniciarBot() {
         const quoted = msg.message.extendedTextMessage?.contextInfo?.quotedMessage;
 
         if (!textoLimpio && !msgType) return;
+
+        // --- LÓGICA DE CONTROL DE GRUPOS ---
+        const isGroup = remitente.endsWith('@g.us');
+        const settings = global.db.data.settings;
+
+        // Si es un grupo y el bot está en 'off', ignoramos todo excepto el comando para encenderlo
+        if (isGroup && settings.grupos === false && !/^\.grupo\s+on$/i.test(textoLimpio)) {
+            return;
+        }
 
         const ctx = { 
             sock, 
