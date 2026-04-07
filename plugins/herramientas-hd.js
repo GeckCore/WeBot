@@ -30,29 +30,40 @@ export default {
         }
 
         try {
-            // 2. Detectar si el mensaje o el citado es una imagen
-            const q = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage || msg.message;
-            const isImage = q?.imageMessage || q?.viewOnceMessage?.message?.imageMessage || q?.viewOnceMessageV2?.message?.imageMessage;
+            // 2. Detección agresiva de imagen (Normal, Citada, Efímera V1/V2)
+            const quoted = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+            const q = quoted || msg.message;
             
-            if (!isImage) {
+            // Buscamos el nodo imageMessage en cualquier profundidad (para efímeros)
+            const findImageNode = (obj) => {
+                if (!obj) return null;
+                if (obj.imageMessage) return obj.imageMessage;
+                if (obj.viewOnceMessage?.message?.imageMessage) return obj.viewOnceMessage.message.imageMessage;
+                if (obj.viewOnceMessageV2?.message?.imageMessage) return obj.viewOnceMessageV2.message.imageMessage;
+                return null;
+            };
+
+            const imageNode = findImageNode(q);
+            
+            if (!imageNode) {
                 return sock.sendMessage(remitente, { text: `${tradutor.texto1}` }, { quoted: msg });
             }
 
-            const mime = isImage.mimetype || "";
+            const mime = imageNode.mimetype || "";
             if (!/image\/(jpe?g|png)/.test(mime)) {
                 return sock.sendMessage(remitente, { text: `${tradutor.texto2[0]} (${mime}) ${tradutor.texto2[1]}` }, { quoted: msg });
             }
 
             await sock.sendMessage(remitente, { text: tradutor.texto3 }, { quoted: msg });
 
-            // 3. Descargar y subir imagen para obtener URL
-            const stream = await downloadContentFromMessage(isImage, 'image');
+            // 3. Descargar y subir imagen (Migrado a Catbox para mayor estabilidad)
+            const stream = await downloadContentFromMessage(imageNode, 'image');
             let buffer = Buffer.from([]);
             for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
 
-            if (buffer.length === 0) throw new Error("No se pudo descargar la imagen.");
+            if (buffer.length === 0) throw new Error("No se pudo descargar la imagen de los servidores de WhatsApp.");
 
-            const imageUrl = await uploadToTelegraph(buffer);
+            const imageUrl = await uploadToCatbox(buffer);
             
             // 4. Llamar a la API de Stellar
             const hdImageBuffer = await upscaleWithStellar(imageUrl);
@@ -65,39 +76,39 @@ export default {
 
         } catch (e) {
             console.error('Error en HD:', e);
-            const errorMessage = e.response?.data?.message || e.message || e;
+            const errorMessage = e.response?.data?.message || e.message || 'Error desconocido';
             await sock.sendMessage(remitente, { text: tradutor.texto4 + errorMessage }, { quoted: msg });
         }
     }
 };
 
 /**
- * Sube un buffer a Telegra.ph para obtener una URL pública
- * Corregido para evitar error 400 (Bad Request)
+ * Sube un buffer a Catbox.moe
+ * Más estable que Telegra.ph para VPS
  */
-async function uploadToTelegraph(buffer) {
+async function uploadToCatbox(buffer) {
     const ft = await fileTypeFromBuffer(buffer);
-    if (!ft) throw new Error('No se pudo determinar el tipo de archivo multimedia.');
+    if (!ft) throw new Error('No se pudo determinar el tipo de archivo.');
     
     const form = new FormData();
-    // Es vital pasar el filename y el contentType para que Telegra.ph no devuelva 400
-    form.append('file', buffer, { 
+    form.append('reqtype', 'fileupload');
+    form.append('fileToUpload', buffer, { 
         filename: `image.${ft.ext}`, 
         contentType: ft.mime 
     });
     
-    const res = await axios.post('https://telegra.ph/upload', form, {
+    const res = await axios.post('https://catbox.moe/user/api.php', form, {
         headers: {
             ...form.getHeaders(),
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36'
         }
     });
     
-    if (!res.data || !res.data[0] || !res.data[0].src) {
-        throw new Error('La respuesta del servidor de imágenes fue inválida.');
+    if (typeof res.data !== 'string' || !res.data.includes('https')) {
+        throw new Error('Error al subir imagen a Catbox: ' + res.data);
     }
     
-    return 'https://telegra.ph' + res.data[0].src;
+    return res.data.trim();
 }
 
 /**
