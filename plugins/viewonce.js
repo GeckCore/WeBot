@@ -1,69 +1,78 @@
 const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
 
 module.exports = {
-    name: 'ver_efimero',
+    name: 'ver_efimero_mystic',
     match: (text) => /^\.(ver|read|revelar)$/i.test(text),
 
     execute: async ({ sock, remitente, msg }) => {
-        // 1. Obtener el ID del mensaje original al que respondiste
-        const quotedInfo = msg.message?.extendedTextMessage?.contextInfo;
-        const targetId = quotedInfo?.stanzaId;
+        // 1. Obtener el ID del mensaje original al que el usuario está respondiendo
+        const targetId = msg.message?.extendedTextMessage?.contextInfo?.stanzaId;
 
         if (!targetId) {
             return await sock.sendMessage(remitente, { 
-                text: '⚠️ Responde al mensaje de "ver una vez" con `.ver`' 
+                text: '⚠️ *Uso:* Debes responder al mensaje de "ver una vez" con `.ver`' 
             }, { quoted: msg });
         }
 
-        // 2. Buscar el mensaje original en nuestra RAM (El equivalente al store.loadMessage de Mystic)
-        const originalMsg = global.mediaCache.get(targetId);
+        // 2. Extraer el mensaje original COMPLETO desde el InMemoryStore nativo
+        const originalMsg = await global.store.loadMessage(remitente, targetId);
 
-        if (!originalMsg) {
+        if (!originalMsg || !originalMsg.message) {
             return await sock.sendMessage(remitente, { 
-                text: '❌ Archivo no encontrado en caché. (El bot estaba apagado cuando se envió o expiró la hora).' 
+                text: '❌ *Error:* El mensaje no está en el registro. Posiblemente fue enviado antes de que el bot estuviera online.' 
             }, { quoted: msg });
         }
 
-        // 3. Aplanar el mensaje como hace simple.js en Mystic
-        let content = originalMsg;
+        // 3. Aplanar el objeto del mensaje (Desempaquetar la matrioska de Baileys)
+        let content = originalMsg.message;
         if (content.ephemeralMessage) content = content.ephemeralMessage.message;
         if (content.viewOnceMessage) content = content.viewOnceMessage.message;
         if (content.viewOnceMessageV2) content = content.viewOnceMessageV2.message;
         if (content.viewOnceMessageV2Extension) content = content.viewOnceMessageV2Extension.message;
+        if (content.documentWithCaptionMessage) content = content.documentWithCaptionMessage.message;
 
-        // 4. Identificar el tipo de multimedia y la estructura interna (con la mediaKey intacta)
-        const mediaTypeObj = Object.keys(content).find(k => k.includes('Message'));
+        // 4. Identificar qué tipo de medio es
+        const mediaTypeObj = Object.keys(content).find(k => k.endsWith('Message'));
         
         if (!mediaTypeObj) {
-            return await sock.sendMessage(remitente, { text: '❌ No se detectó contenido multimedia.' }, { quoted: msg });
+            return await sock.sendMessage(remitente, { text: '❌ No se encontró contenido multimedia en este mensaje.' }, { quoted: msg });
         }
 
         const mediaMsg = content[mediaTypeObj];
-        const mediaType = mediaTypeObj.replace('Message', ''); // 'image', 'video' o 'audio'
+        const mediaType = mediaTypeObj.replace('Message', ''); // Ej: 'image', 'video'
 
-        await sock.sendMessage(remitente, { text: '⏳ *Desencriptando llave local...*' }, { quoted: msg });
+        await sock.sendMessage(remitente, { text: '⏳ *Extrayendo llave y desencriptando...*' }, { quoted: msg });
 
         try {
-            // 5. Descargar usando la mediaKey original
+            // 5. Descargar el archivo usando la llave criptográfica preservada en el Store
             const stream = await downloadContentFromMessage(mediaMsg, mediaType);
             let buffer = Buffer.from([]);
             for await (const chunk of stream) {
                 buffer = Buffer.concat([buffer, chunk]);
             }
 
-            // 6. Reenviar al usuario
+            // 6. Enviar el archivo revelado
             if (mediaType === 'video') {
-                await sock.sendMessage(remitente, { video: buffer, caption: '✅ Revelado' }, { quoted: msg });
+                await sock.sendMessage(remitente, { 
+                    video: buffer, 
+                    caption: '👁️ *Contenido Revelado*' 
+                }, { quoted: msg });
             } else if (mediaType === 'image') {
-                await sock.sendMessage(remitente, { image: buffer, caption: '✅ Revelado' }, { quoted: msg });
+                await sock.sendMessage(remitente, { 
+                    image: buffer, 
+                    caption: '👁️ *Contenido Revelado*' 
+                }, { quoted: msg });
             } else if (mediaType === 'audio') {
-                await sock.sendMessage(remitente, { audio: buffer, ptt: true }, { quoted: msg });
+                await sock.sendMessage(remitente, { 
+                    audio: buffer, 
+                    ptt: true 
+                }, { quoted: msg });
             }
 
         } catch (err) {
             console.error('Error al desencriptar viewOnce:', err);
             await sock.sendMessage(remitente, { 
-                text: '❌ Error al desencriptar. Los servidores de Meta ya destruyeron la llave original.' 
+                text: '❌ *Fallo de Desencriptación:* Los servidores de Meta ya han invalidado la llave de este archivo.' 
             }, { quoted: msg });
         }
     }
