@@ -1,10 +1,20 @@
-// --- IMPORTACIÓN SEGURA (Bypass para ESM a CommonJS) ---
-const baileys = require('@whiskeysockets/baileys');
-const makeWASocket = baileys.default || baileys.makeWASocket;
-const useMultiFileAuthState = baileys.useMultiFileAuthState || baileys.default?.useMultiFileAuthState;
-const fetchLatestBaileysVersion = baileys.fetchLatestBaileysVersion || baileys.default?.fetchLatestBaileysVersion;
-const downloadContentFromMessage = baileys.downloadContentFromMessage || baileys.default?.downloadContentFromMessage;
-const makeInMemoryStore = baileys.makeInMemoryStore || baileys.default?.makeInMemoryStore;
+// --- IMPORTACIÓN SEGURA Y ROBUSTA (Bypass ESM/CommonJS) ---
+const baileysModule = require('@whiskeysockets/baileys');
+
+// Función para extraer funciones independientemente de cómo esté empaquetado el módulo
+const getBaileysFunction = (name) => {
+    if (baileysModule[name]) return baileysModule[name];
+    if (baileysModule.default && baileysModule.default[name]) return baileysModule.default[name];
+    if (baileysModule.default && baileysModule.default.default && baileysModule.default.default[name]) return baileysModule.default.default[name];
+    return undefined;
+};
+
+const makeWASocket = getBaileysFunction('makeWASocket');
+const useMultiFileAuthState = getBaileysFunction('useMultiFileAuthState');
+const fetchLatestBaileysVersion = getBaileysFunction('fetchLatestBaileysVersion');
+const downloadContentFromMessage = getBaileysFunction('downloadContentFromMessage');
+const makeInMemoryStore = getBaileysFunction('makeInMemoryStore');
+const jidNormalizedUser = getBaileysFunction('jidNormalizedUser');
 
 const qrcode = require('qrcode-terminal');
 const fs = require('fs');
@@ -19,6 +29,12 @@ global.db = low(adapter);
 global.db.defaults({ users: {}, chats: {}, settings: {} }).write();
 
 // --- ALMACENAMIENTO NATIVO (Método The Mystic) ---
+// Verificación de seguridad antes de inicializar
+if (typeof makeInMemoryStore !== 'function') {
+    console.error('[CRÍTICO] No se pudo cargar makeInMemoryStore de Baileys. Revisa la instalación.');
+    process.exit(1);
+}
+
 global.store = makeInMemoryStore({ logger: pino({ level: 'silent' }) });
 global.store.readFromFile('./baileys_store.json');
 
@@ -53,7 +69,8 @@ async function iniciarBot() {
         syncFullHistory: false,
         getMessage: async (key) => {
             if (global.store) {
-                const msg = await global.store.loadMessage(key.remoteJid, key.id);
+                const jid = jidNormalizedUser(key.remoteJid);
+                const msg = await global.store.loadMessage(jid, key.id);
                 return msg?.message || undefined;
             }
             return { conversation: 'Mensaje no encontrado' };
