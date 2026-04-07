@@ -1,7 +1,8 @@
-const { default: makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion, downloadContentFromMessage } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion, downloadContentFromMessage, makeInMemoryStore } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode-terminal');
 const fs = require('fs');
 const path = require('path');
+const pino = require('pino');
 
 // --- BASE DE DATOS ---
 const low = require('lowdb');
@@ -10,8 +11,14 @@ const adapter = new FileSync('database.json');
 global.db = low(adapter);
 global.db.defaults({ users: {}, chats: {}, settings: {} }).write();
 
-// --- CACHÉ RAM (El Interceptor) ---
-global.mediaCache = new Map();
+// --- ALMACENAMIENTO NATIVO (Método The Mystic) ---
+global.store = makeInMemoryStore({ logger: pino({ level: 'silent' }) });
+global.store.readFromFile('./baileys_store.json');
+
+// Guardado automático cada 10 segundos
+setInterval(() => {
+    global.store.writeToFile('./baileys_store.json');
+}, 10000);
 
 const isWindows = process.platform === 'win32';
 const binarios = ['yt-dlp', 'ffmpeg'];
@@ -36,8 +43,18 @@ async function iniciarBot() {
         auth: state,
         printQRInTerminal: false,
         browser: ['Bot-Privado', 'Chrome', '122.0.0.0'],
-        syncFullHistory: false
+        syncFullHistory: false,
+        getMessage: async (key) => {
+            if (global.store) {
+                const msg = await global.store.loadMessage(key.remoteJid, key.id);
+                return msg?.message || undefined;
+            }
+            return { conversation: 'Mensaje no encontrado' };
+        }
     });
+
+    // VINCULACIÓN CRÍTICA (Como en main.js)
+    global.store.bind(sock.ev);
 
     sock.ev.on('creds.update', saveCreds);
 
@@ -63,14 +80,6 @@ async function iniciarBot() {
     sock.ev.on('messages.upsert', async (m) => {
         const msg = m.messages[0];
         if (!msg.message || msg.key.remoteJid === 'status@broadcast') return;
-
-        // --- INTERCEPTOR ABSOLUTO DE CACHÉ ---
-        // Guardamos la estructura criptográfica en RAM antes de que cualquier filtro la descarte.
-        global.mediaCache.set(msg.key.id, msg.message);
-        
-        // Auto-limpieza: Libera la RAM tras 60 minutos.
-        setTimeout(() => global.mediaCache.delete(msg.key.id), 3600000);
-        // -------------------------------------
 
         global.db.data = global.db.getState();
 
