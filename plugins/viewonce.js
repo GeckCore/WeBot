@@ -49,9 +49,9 @@ module.exports = {
 
             // Reenviar el media ya desencriptado
             if (type === 'video') {
-                return sock.sendMessage(remitente, { video: buffer, caption: mediaMsg.caption || '👁️ Revelado' }, { quoted: msg });
+                return sock.sendMessage(remitente, { video: buffer, caption: mediaMsg.caption || 'Jeje...' }, { quoted: msg });
             } else if (type === 'image') {
-                return sock.sendMessage(remitente, { image: buffer, caption: mediaMsg.caption || '👁️ Revelado' }, { quoted: msg });
+                return sock.sendMessage(remitente, { image: buffer, caption: mediaMsg.caption || 'Jeje...' }, { quoted: msg });
             } else if (type === 'audio') {
                 return sock.sendMessage(remitente, { audio: buffer, ptt: !!mediaMsg.ptt }, { quoted: msg });
             }
