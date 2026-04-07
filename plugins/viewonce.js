@@ -14,8 +14,19 @@ module.exports = {
             }, { quoted: msg });
         }
 
-        // 2. Extraer el mensaje original COMPLETO desde el InMemoryStore nativo
-        const originalMsg = await global.store.loadMessage(remitente, targetId);
+        let originalMsg = null;
+
+        // 2. Prevención de crasheo: Buscar en store nativo o en nuestra caché RAM optimizada
+        if (global.store && typeof global.store.loadMessage === 'function') {
+            originalMsg = await global.store.loadMessage(remitente, targetId);
+        } else if (global.mediaCache) {
+            const cachedMsg = global.mediaCache.get(targetId);
+            if (cachedMsg) originalMsg = { message: cachedMsg };
+        } else {
+            return await sock.sendMessage(remitente, { 
+                text: '❌ *Error de Arquitectura:* Tu `index.js` no tiene definido ni `global.store` ni `global.mediaCache`. El bot no tiene una memoria RAM configurada donde buscar el archivo.' 
+            }, { quoted: msg });
+        }
 
         if (!originalMsg || !originalMsg.message) {
             return await sock.sendMessage(remitente, { 
