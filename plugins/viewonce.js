@@ -1,64 +1,66 @@
-import { downloadContentFromMessage } from '@whiskeysockets/baileys'
+module.exports = {
+    name: 'ver_efimero',
+    // Filtro regex para los comandos
+    match: (text) => /^\.(readviewonce|read|ver|readvo)$/i.test(text),
 
-let handler = async (m, { conn }) => {
-    if (!m.quoted) throw "⚠️ Responde al mensaje efímero con este comando."
-    
-    try {
-        // En TheMystic, m.quoted suele traer el objeto de mensaje parseado
-        let msg = m.quoted.message || m.quoted;
-        
-        // Desempaquetado seguro para cualquier variante de viewOnce de WhatsApp
-        let isViewOnce = false;
-        let content = msg;
-
-        if (msg.viewOnceMessage) {
-            content = msg.viewOnceMessage.message;
-            isViewOnce = true;
-        } else if (msg.viewOnceMessageV2) {
-            content = msg.viewOnceMessageV2.message;
-            isViewOnce = true;
-        } else if (msg.viewOnceMessageV2Extension) {
-            content = msg.viewOnceMessageV2Extension.message;
-            isViewOnce = true;
-        } else if (m.quoted.mtype === 'viewOnceMessageV2' || m.quoted.isViewOnce) {
-            isViewOnce = true;
+    execute: async ({ sock, remitente, msg, quoted, downloadContentFromMessage }) => {
+        if (!quoted) {
+            return sock.sendMessage(remitente, { 
+                text: "⚠️ *Uso:* Responde al mensaje efímero con este comando." 
+            }, { quoted: msg });
         }
 
-        if (!isViewOnce) throw '❌ El mensaje citado no es un ViewOnce (Ver una vez).'
-        if (!content) throw '❌ El mensaje está vacío (Probablemente purgado de la RAM del bot).'
+        try {
+            let content = quoted;
+            let isViewOnce = false;
 
-        // Extraer el tipo de multimedia real
-        let mediaTypeKey = Object.keys(content).find(k => k.includes('Message'));
-        if (!mediaTypeKey) throw '❌ No se detectó imagen, video ni audio en la estructura.';
+            // Detección agresiva de estructuras efímeras (Android, iOS, Web)
+            if (content.viewOnceMessage) {
+                content = content.viewOnceMessage.message;
+                isViewOnce = true;
+            } else if (content.viewOnceMessageV2) {
+                content = content.viewOnceMessageV2.message;
+                isViewOnce = true;
+            } else if (content.viewOnceMessageV2Extension) {
+                content = content.viewOnceMessageV2Extension.message;
+                isViewOnce = true;
+            }
 
-        let mediaMsg = content[mediaTypeKey];
-        let type = mediaTypeKey.replace('Message', ''); // 'image', 'video', 'audio'
+            // Identificar el tipo de media
+            const MEDIA_TYPES = ['imageMessage', 'videoMessage', 'audioMessage'];
+            let mediaTypeKey = Object.keys(content || {}).find(k => MEDIA_TYPES.includes(k));
 
-        // Descarga y desencriptación nativa
-        let media = await downloadContentFromMessage(mediaMsg, type);
-        let buffer = Buffer.from([]);
-        
-        for await (const chunk of media) {
-            buffer = Buffer.concat([buffer, chunk]);
+            if (!mediaTypeKey) {
+                return sock.sendMessage(remitente, { 
+                    text: '❌ No se detectó imagen, video ni audio, o el mensaje ya fue purgado de la RAM.' 
+                }, { quoted: msg });
+            }
+
+            let mediaMsg = content[mediaTypeKey];
+            let type = mediaTypeKey.replace('Message', ''); // 'image', 'video', 'audio'
+
+            // Descargar por CDN
+            let media = await downloadContentFromMessage(mediaMsg, type);
+            let chunks = [];
+            for await (const chunk of media) {
+                chunks.push(chunk);
+            }
+            let buffer = Buffer.concat(chunks);
+
+            // Reenviar el media ya desencriptado
+            if (type === 'video') {
+                return sock.sendMessage(remitente, { video: buffer, caption: mediaMsg.caption || '👁️ Revelado' }, { quoted: msg });
+            } else if (type === 'image') {
+                return sock.sendMessage(remitente, { image: buffer, caption: mediaMsg.caption || '👁️ Revelado' }, { quoted: msg });
+            } else if (type === 'audio') {
+                return sock.sendMessage(remitente, { audio: buffer, ptt: !!mediaMsg.ptt }, { quoted: msg });
+            }
+
+        } catch (e) {
+            console.error('[viewonce] Error de desencriptación:', e);
+            return sock.sendMessage(remitente, { 
+                text: `❌ *Error técnico al revelar:*\n\`${e.message || 'La llave del mensaje ha caducado.'}\`` 
+            }, { quoted: msg });
         }
-
-        // Envío del resultado
-        if (type === 'video') {
-            return conn.sendFile(m.chat, buffer, 'media.mp4', mediaMsg.caption || '👁️ Revelado', m);
-        } else if (type === 'image') {
-            return conn.sendFile(m.chat, buffer, 'media.jpg', mediaMsg.caption || '👁️ Revelado', m);
-        } else if (type === 'audio') {
-            return conn.sendFile(m.chat, buffer, 'audio.mp3', '', m, false, { ptt: !!mediaMsg.ptt });
-        }
-
-    } catch (e) {
-        console.error('[viewonce-plugin] Error:', e);
-        throw typeof e === 'string' ? e : `❌ Error técnico al desencriptar: ${e.message || 'La llave del mensaje caducó o fue purgada.'}`;
     }
-}
-
-handler.help = ['readvo'];
-handler.tags = ['tools'];
-handler.command = ['readviewonce', 'read', 'ver', 'readvo'];
-
-export default handler;
+};
