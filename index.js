@@ -1,20 +1,27 @@
-const { default: makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion, downloadContentFromMessage } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion, downloadContentFromMessage, makeInMemoryStore, jidNormalizedUser } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode-terminal');
 const fs = require('fs');
 const path = require('path');
 const lodash = require('lodash');
+const pino = require('pino');
 
-// --- BASE DE DATOS ---
+// --- MOTOR DE BASE DE DATOS (Niveles, Warns, etc.) ---
 const low = require('lowdb');
 const FileSync = require('lowdb/adapters/FileSync');
 const adapter = new FileSync('database.json');
 global.db = low(adapter);
 global.db.defaults({ users: {}, chats: {}, settings: {} }).write();
 
-// --- MICRO-STORE PARA VIEW ONCE (OPTIMIZADO) ---
-// Actúa como el store de Mystic, pero se auto-limpia para no saturar la VPS
-global.mediaCache = new Map();
+// --- ALMACENAMIENTO NATIVO DE BAILEYS (Estilo Mystic) ---
+// Esto guarda los mensajes (y sus llaves de desencriptación) para poder abrirlos después
+const store = makeInMemoryStore({ logger: pino({ level: 'silent' }) });
+store.readFromFile('./baileys_store.json');
+setInterval(() => {
+    store.writeToFile('./baileys_store.json');
+}, 10_000 * 60); // Auto-guardado cada 10 minutos
+global.store = store;
 
+// --- VERIFICACIÓN DE BINARIOS ---
 const isWindows = process.platform === 'win32';
 const binarios = ['yt-dlp', 'ffmpeg'];
 binarios.forEach(bin => {
@@ -37,17 +44,35 @@ async function iniciarBot() {
         version, 
         auth: state, 
         printQRInTerminal: false,
-        // Usamos el browser de Mystic para evitar bloqueos
+        // Emulamos el dispositivo de Mystic
         browser: ['TheMystic-Bot-MD', 'Safari', '2.0.0'], 
-        syncFullHistory: false
+        syncFullHistory: false,
+        // ESTO ES CLAVE: Permite al bot reconstruir mensajes citados desde la RAM
+        getMessage: async (key) => {
+            try {
+                const jid = jidNormalizedUser(key.remoteJid);
+                const msg = await store.loadMessage(jid, key.id);
+                return msg?.message || undefined;
+            } catch (err) {
+                return undefined;
+            }
+        }
     });
 
+    // Vinculamos el almacén de mensajes a la conexión (Vital para el ViewOnce)
+    store.bind(sock.ev);
+
     sock.ev.on('creds.update', saveCreds);
+
     sock.ev.on('connection.update', (update) => {
         const { connection, qr } = update;
         if (qr) qrcode.generate(qr, { small: true });
-        if (connection === 'close') iniciarBot();
-        else if (connection === 'open') console.log(`[INFO] Bot Online (${plugins.length} plugins).`);
+        if (connection === 'close') {
+            console.log('[INFO] Conexión cerrada. Reconectando...');
+            iniciarBot();
+        } else if (connection === 'open') {
+            console.log(`[INFO] ¡Conectado! (${plugins.length} plugins cargados)`);
+        }
     });
 
     const getMediaInfo = (msgObj) => {
@@ -61,15 +86,6 @@ async function iniciarBot() {
     sock.ev.on('messages.upsert', async (m) => {
         const msg = m.messages[0];
         if (!msg.message || msg.key.remoteJid === 'status@broadcast') return;
-
-        const msgId = msg.key.id;
-        
-        // INTERCEPTOR: Guardar mensaje en RAM si contiene algún tipo de multimedia
-        // Esto incluye los viewOnce ocultos
-        global.mediaCache.set(msgId, msg.message);
-        
-        // Auto-eliminar de la RAM en 1 hora para optimizar la VPS
-        setTimeout(() => global.mediaCache.delete(msgId), 3600000);
 
         global.db.data = global.db.getState();
 
@@ -86,7 +102,7 @@ async function iniciarBot() {
                     await plugin.execute(ctx);
                     global.db.write();
                 } catch (err) {
-                    console.error(`Error en ${plugin.name}:`, err);
+                    console.error(`Error en plugin ${plugin.name}:`, err);
                 }
                 break;
             }
