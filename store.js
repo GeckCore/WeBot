@@ -3,27 +3,20 @@
  * The code integrates functionalities from the Baileys WhatsApp Web API library, 
  * specifically the @whiskeysockets/baileys version, to handle events, manage chats, 
  * groups, contacts, and presence updates for WhatsApp clients. 
- * * Credits:
- * Original code provided by @Skidy89 on GitHub (Baileys WhatsApp API).
- * See: https://github.com/Skidy89/baileys
- *
- * Fix:
- * chats.set, contacts.set does exist in newer versions of Baileys
- * see more https://github.com/Skidy89/baileys?tab=readme-ov-
- *
- * Contribution:
- * Ciphertext error fix and additional improvements by @BrunoSobrino
- * See: https://github.com/BrunoSobrino
  */
 const { BufferJSON, proto, isJidBroadcast, WAMessageStubType, updateMessageWithReceipt, updateMessageWithReaction, jidNormalizedUser } = (await import('baileys')).default;
 
 const TIME_TO_DATA_STALE = 5 * 60 * 1000;
-const MAX_MESSAGES_PER_CHAT = 1500; // Limite de RAM para historial
+const MAX_MESSAGES_PER_CHAT = 1500;
 
 function makeInMemoryStore() {
     let chats = {};
     let messages = {};
     let state = { connection: 'close' };
+
+    function getJid(jid) {
+        return jid?.decodeJid?.() || jidNormalizedUser(jid) || jid;
+    }
 
     function loadMessage(jid, id = null) {
         let message = null;
@@ -33,7 +26,7 @@ function makeInMemoryStore() {
             const messageFind = Object.entries(messages).find(([, msgs]) => msgs.find(filter));
             message = messageFind?.[1]?.find(filter);
         } else {
-            jid = jid?.decodeJid?.();
+            jid = getJid(jid);
             if (!(jid in messages)) return null;
             message = messages[jid]?.find(m => m.key.id == id);
         }
@@ -41,7 +34,7 @@ function makeInMemoryStore() {
     }
 
     async function fetchGroupMetadata(jid, groupMetadata) {
-        jid = jid?.decodeJid?.();
+        jid = getJid(jid);
         if (!isJidGroup(jid)) return;
         if (!(jid in chats)) return (chats[jid] = { id: jid });
         const isRequiredToUpdate = !chats[jid].metadata || Date.now() - (chats[jid].lastfetch || 0) > TIME_TO_DATA_STALE;
@@ -53,19 +46,28 @@ function makeInMemoryStore() {
     }
 
     function upsertMessage(jid, message, type = 'append') {
-        jid = jid?.decodeJid?.();
+        jid = getJid(jid);
         if (!(jid in messages)) messages[jid] = [];
+        
+        const msgId = message.key?.id;
+        
+        // Mantener la caché global sincronizada para que viewonce.js encuentre el ID
+        if (msgId) {
+            if (!global.mediaCache) global.mediaCache = new Map();
+            global.mediaCache.set(msgId, message);
+        }
+
         delete message.message?.messageContextInfo;
         delete message.message?.senderKeyDistributionMessage;
         
-        const msg = loadMessage(jid, message.key.id);
+        const msg = loadMessage(jid, msgId);
         if (msg) {
             Object.assign(msg, message);
         } else {
             type === 'append' ? messages[jid].push(message) : messages[jid].unshift(message);
         }
 
-        // Prevención estricta de desbordamiento de RAM
+        // Prevenir consumo masivo de RAM
         if (messages[jid].length > MAX_MESSAGES_PER_CHAT) {
             messages[jid].splice(0, messages[jid].length - MAX_MESSAGES_PER_CHAT);
         }
@@ -74,22 +76,20 @@ function makeInMemoryStore() {
     function bind(conn) {
         if (!conn.chats) conn.chats = {};
 
-        // 1. FIX CLAVE: Capturar sincronización de historial de Baileys
         conn.ev.on('messaging-history.set', ({ messages: historyMessages }) => {
             if (historyMessages) {
                 for (const msg of historyMessages) {
-                    const jid = msg.key.remoteJid?.decodeJid?.() || msg.key.remoteJid;
+                    const jid = getJid(msg.key.remoteJid);
                     if (!jid || isJidBroadcast(jid)) continue;
                     upsertMessage(jid, proto.WebMessageInfo.fromObject(msg), 'append');
                 }
             }
         });
 
-        // 2. Mensajes nuevos
         conn.ev.on('messages.upsert', ({ messages: newMessages, type }) => {
             if (['append', 'notify'].includes(type)) {
                 for (const msg of newMessages) {
-                    const jid = msg.key.remoteJid?.decodeJid?.();
+                    const jid = getJid(msg.key.remoteJid);
                     if (!jid || isJidBroadcast(jid)) continue;
                     upsertMessage(jid, proto.WebMessageInfo.fromObject(msg), type);
                 }
@@ -98,7 +98,7 @@ function makeInMemoryStore() {
 
         conn.ev.on('messages.update', updates => {
             for (const { key, update } of updates) {
-                const jid = key.remoteJid?.decodeJid?.();
+                const jid = getJid(key.remoteJid);
                 const message = loadMessage(jid, key.id);
                 if (message) Object.assign(message, update);
             }
@@ -106,7 +106,7 @@ function makeInMemoryStore() {
 
         conn.ev.on('message-receipt.update', updates => {
             for (const { key, receipt } of updates) {
-                const jid = key.remoteJid?.decodeJid?.();
+                const jid = getJid(key.remoteJid);
                 const message = loadMessage(jid, key.id);
                 if (message) updateMessageWithReceipt(message, receipt);
             }
@@ -114,7 +114,7 @@ function makeInMemoryStore() {
 
         conn.ev.on('messages.reaction', updates => {
             for (const { key, reaction } of updates) {
-                const jid = key.remoteJid?.decodeJid?.();
+                const jid = getJid(key.remoteJid);
                 const message = loadMessage(jid, key.id);
                 if (message) updateMessageWithReaction(message, reaction);
             }
@@ -122,7 +122,7 @@ function makeInMemoryStore() {
 
         conn.ev.on('chats.set', ({ chats: newChats }) => {
             for (const chat of newChats) {
-                const jid = chat.id.decodeJid();
+                const jid = getJid(chat.id);
                 if (!(jid in chats)) chats[jid] = { id: jid };
                 Object.assign(chats[jid], chat);
             }
@@ -130,7 +130,7 @@ function makeInMemoryStore() {
 
         conn.ev.on('contacts.set', ({ contacts: newContacts }) => {
             for (const contact of newContacts) {
-                const jid = contact.id.decodeJid();
+                const jid = getJid(contact.id);
                 if (!(jid in chats)) chats[jid] = { id: jid };
                 Object.assign(chats[jid], contact);
             }
@@ -138,7 +138,7 @@ function makeInMemoryStore() {
 
         conn.ev.on('chats.upsert', newChats => {
             for (const chat of newChats) {
-                const jid = chat.id.decodeJid();
+                const jid = getJid(chat.id);
                 if (!(jid in chats)) chats[jid] = { id: jid };
                 Object.assign(chats[jid], chat);
             }
@@ -146,14 +146,14 @@ function makeInMemoryStore() {
 
         conn.ev.on('chats.update', updates => {
             for (const update of updates) {
-                const jid = update.id.decodeJid();
+                const jid = getJid(update.id);
                 if (!(jid in chats)) chats[jid] = { id: jid };
                 Object.assign(chats[jid], update);
             }
         });
 
         conn.ev.on('presence.update', ({ id, presences: updates }) => {
-            const jid = id.decodeJid();
+            const jid = getJid(id);
             if (!(jid in chats)) chats[jid] = { id: jid };
             Object.assign(chats[jid], { presences: { ...chats[jid].presences, ...updates } });
         });
@@ -183,4 +183,9 @@ function makeInMemoryStore() {
     return { bind, loadMessage, toJSON, fromJSON, upsertMessage };
 }
 
-export default makeInMemoryStore();
+const store = makeInMemoryStore();
+
+// Exposición imperativa en RAM global para viewonce
+global.store = store;
+
+export default store;
