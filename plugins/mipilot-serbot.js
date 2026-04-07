@@ -1,4 +1,4 @@
-import { makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion, jidNormalizedUser } from '@whiskeysockets/baileys';
+import { makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion, jidNormalizedUser, Browsers } from '@whiskeysockets/baileys';
 import QRCode from 'qrcode';
 import fs from 'fs';
 import path from 'path';
@@ -36,11 +36,15 @@ export default {
                 auth: state,
                 logger: pino({ level: 'silent' }),
                 printQRInTerminal: false,
-                browser: ['Sub-Bot (VPS)', 'Chrome', '1.0.0'],
+                browser: Browsers.macOS('Desktop'), // Estandarizado para evitar rechazos de dispositivo
                 syncFullHistory: false,
-                markOnline: false, // Evita conflictos de presencia que causan el error 479
+                markOnline: false, 
                 defaultQueryTimeoutMs: undefined,
-                getMessage: async (key) => ({ conversation: 'Sub-bot system' })
+                getMessage: async (key) => {
+                    // FIX ABSOLUTO: Devolver undefined o el mensaje real. 
+                    // Un objeto falso causa el Error 479 y el crasheo 515 en Meta.
+                    return global.store?.loadMessage(key.remoteJid, key.id)?.message || undefined;
+                }
             });
 
             let qrSent = false;
@@ -52,14 +56,13 @@ export default {
             subSock.ev.on('connection.update', async (update) => {
                 const { connection, lastDisconnect, qr } = update;
 
-                // --- MANEJO DE QR (Sin Sharp) ---
+                // --- MANEJO DE QR ---
                 if (qr) {
                     try {
                         const qrBuffer = await QRCode.toBuffer(qr);
                         const caption = '🤳 *¡CONVIÉRTETE EN BOT!* 🤳\n\nEscanea este código QR para vincular tu número a la VPS.\n\n*Nota:* Si el código falla, asegúrate de no tener muchas sesiones activas.';
                         
                         if (!qrSent) {
-                            // Enviamos con thumbnail vacío para evitar el error de "unsupported image format" de Sharp
                             qrMsg = await sock.sendMessage(remitente, { 
                                 image: qrBuffer, 
                                 caption,
@@ -67,7 +70,6 @@ export default {
                             }, { quoted: msg });
                             qrSent = true;
                         } else {
-                            // Enviar uno nuevo si el anterior caduca
                             await sock.sendMessage(remitente, { 
                                 image: qrBuffer, 
                                 caption,
@@ -108,6 +110,7 @@ export default {
 
                     if (!isLogout) {
                         console.log(`[SUB-BOT] Reintentando conexión para ${userNumber} en 5 segundos...`);
+                        subSock.ev.removeAllListeners(); // Evita fugas de memoria y acumulación de eventos
                         setTimeout(() => startSubBot(), 5000);
                     } else {
                         fs.rmSync(sessionPath, { recursive: true, force: true });
@@ -117,7 +120,7 @@ export default {
             });
 
             subSock.ev.on('messages.upsert', async (m) => {
-                // Aquí podrías vincular tu manejador principal si quieres que el sub-bot responda comandos
+                // Delegación de mensajes del sub-bot (vacío por ahora)
             });
         }
 
