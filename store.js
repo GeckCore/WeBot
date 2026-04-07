@@ -1,24 +1,21 @@
 /*
- * This code is adapted and modified from the original source provided by the user.
- * The code integrates functionalities from the Baileys WhatsApp Web API library, 
- * specifically the @whiskeysockets/baileys version, to handle events, manage chats, 
- * groups, contacts, and presence updates for WhatsApp clients. 
+ * store.js - Parcheado con Auto-Bind e Interceptor Letal para TheMystic-Bot
  */
-const { proto, isJidBroadcast, WAMessageStubType, updateMessageWithReceipt, updateMessageWithReaction, jidNormalizedUser } = (await import('baileys')).default;
+const { proto, isJidBroadcast, updateMessageWithReceipt, updateMessageWithReaction, jidNormalizedUser } = (await import('baileys')).default;
 
 const TIME_TO_DATA_STALE = 5 * 60 * 1000;
 const MAX_MESSAGES_PER_CHAT = 1500;
+let isBound = false;
 
 function makeInMemoryStore() {
     let chats = {};
     let messages = {};
-    let state = { connection: 'close' };
 
     function getJid(jid) {
         return jid?.decodeJid?.() || jidNormalizedUser(jid) || jid;
     }
 
-    // Clonación profunda para aislar el mensaje de la purga de RAM del bot
+    // Clonación profunda extrema para independizar el objeto antes de la purga
     function safeClone(obj) {
         if (obj === null || typeof obj !== 'object') return obj;
         if (Buffer.isBuffer(obj)) return Buffer.from(obj);
@@ -27,7 +24,6 @@ function makeInMemoryStore() {
         
         const cloned = {};
         for (const key in obj) {
-            // Ignorar metadatos pesados innecesarios
             if (key === 'messageContextInfo' || key === 'senderKeyDistributionMessage') continue;
             cloned[key] = safeClone(obj[key]);
         }
@@ -49,45 +45,14 @@ function makeInMemoryStore() {
         return message || null;
     }
 
-    async function fetchGroupMetadata(jid, groupMetadata) {
-        jid = getJid(jid);
-        if (!isJidGroup(jid)) return;
-        if (!(jid in chats)) return (chats[jid] = { id: jid });
-        const isRequiredToUpdate = !chats[jid].metadata || Date.now() - (chats[jid].lastfetch || 0) > TIME_TO_DATA_STALE;
-        if (isRequiredToUpdate) {
-            const metadata = await groupMetadata?.(jid);
-            if (metadata) Object.assign(chats[jid], { subject: metadata.subject, lastfetch: Date.now(), metadata });
-        }
-        return chats[jid].metadata;
-    }
-
     function upsertMessage(jid, message, type = 'append') {
         jid = getJid(jid);
         if (!(jid in messages)) messages[jid] = [];
         
-        const msgId = message.key?.id;
+        delete message.message?.messageContextInfo;
+        delete message.message?.senderKeyDistributionMessage;
         
-        if (msgId) {
-            if (!global.mediaCache) global.mediaCache = new Map();
-            
-            const content = message.message;
-            // Solo clonamos si es efímero o multimedia para no consumir RAM a lo tonto con texto plano
-            const isMediaOrEfimero = content && (
-                content.viewOnceMessage || 
-                content.viewOnceMessageV2 || 
-                content.viewOnceMessageV2Extension || 
-                content.ephemeralMessage || 
-                content.imageMessage || 
-                content.videoMessage || 
-                content.audioMessage
-            );
-
-            if (isMediaOrEfimero) {
-                // Se guarda una copia aislada e independiente en la caché
-                global.mediaCache.set(msgId, safeClone(message));
-            }
-        }
-
+        const msgId = message.key?.id;
         const msg = loadMessage(jid, msgId);
         if (msg) {
             Object.assign(msg, message);
@@ -95,24 +60,47 @@ function makeInMemoryStore() {
             type === 'append' ? messages[jid].push(message) : messages[jid].unshift(message);
         }
 
-        // Control estructural de RAM para historial
         if (messages[jid].length > MAX_MESSAGES_PER_CHAT) {
             messages[jid].splice(0, messages[jid].length - MAX_MESSAGES_PER_CHAT);
         }
     }
 
     function bind(conn) {
+        if (isBound) return;
+        isBound = true;
+
         if (!conn.chats) conn.chats = {};
 
-        conn.ev.on('messaging-history.set', ({ messages: historyMessages }) => {
-            if (historyMessages) {
-                for (const msg of historyMessages) {
-                    const jid = getJid(msg.key.remoteJid);
-                    if (!jid || isJidBroadcast(jid)) continue;
-                    upsertMessage(jid, msg, 'append');
+        // INTERCEPTOR LETAL: Captura el evento nativo de Baileys antes que los handlers del bot
+        const originalEmit = conn.ev.emit;
+        conn.ev.emit = function (name, data) {
+            if (name === 'messages.upsert' && data && data.messages) {
+                for (const msg of data.messages) {
+                    if (!msg || !msg.key) continue;
+                    
+                    const msgId = msg.key.id;
+                    if (msgId && msg.message) {
+                        const content = msg.message;
+                        const isMediaOrEfimero = content && (
+                            content.viewOnceMessage || 
+                            content.viewOnceMessageV2 || 
+                            content.viewOnceMessageV2Extension || 
+                            content.ephemeralMessage || 
+                            content.imageMessage || 
+                            content.videoMessage || 
+                            content.audioMessage
+                        );
+
+                        if (isMediaOrEfimero) {
+                            if (!global.mediaCache) global.mediaCache = new Map();
+                            // Se guarda la copia intacta antes de que handler.js borre msg.message
+                            global.mediaCache.set(msgId, safeClone(msg));
+                        }
+                    }
                 }
             }
-        });
+            return originalEmit.apply(this, arguments);
+        };
 
         conn.ev.on('messages.upsert', ({ messages: newMessages, type }) => {
             if (['append', 'notify'].includes(type)) {
@@ -156,14 +144,6 @@ function makeInMemoryStore() {
             }
         });
 
-        conn.ev.on('contacts.set', ({ contacts: newContacts }) => {
-            for (const contact of newContacts) {
-                const jid = getJid(contact.id);
-                if (!(jid in chats)) chats[jid] = { id: jid };
-                Object.assign(chats[jid], contact);
-            }
-        });
-
         conn.ev.on('chats.upsert', newChats => {
             for (const chat of newChats) {
                 const jid = getJid(chat.id);
@@ -179,39 +159,21 @@ function makeInMemoryStore() {
                 Object.assign(chats[jid], update);
             }
         });
-
-        conn.ev.on('presence.update', ({ id, presences: updates }) => {
-            const jid = getJid(id);
-            if (!(jid in chats)) chats[jid] = { id: jid };
-            Object.assign(chats[jid], { presences: { ...chats[jid].presences, ...updates } });
-        });
-
-        conn.ev.on('message-reaction.update', updates => {
-            for (const update of updates) {
-                const message = loadMessage(update.key.remoteJid, update.key.id);
-                if (message) {
-                    message.reactions = message.reactions || [];
-                    message.reactions.push(update.reaction);
-                }
-            }
-        });
     }
 
-    function toJSON() {
-        return { chats, messages };
-    }
-
-    function fromJSON(json) {
-        Object.assign(chats, json.chats);
-        for (const jid in json.messages) {
-            messages[jid] = json.messages[jid].map(m => m);
-        }
-    }
-
-    return { bind, loadMessage, toJSON, fromJSON, upsertMessage };
+    return { bind, loadMessage, messages, chats };
 }
 
 const store = makeInMemoryStore();
 global.store = store;
+
+// AUTO-BIND: Se asegura de vincularse a la conexión principal ni bien exista, sin tocar main.js
+const bindInterval = setInterval(() => {
+    if (global.conn && global.conn.ev && !isBound) {
+        store.bind(global.conn);
+        clearInterval(bindInterval);
+        console.log('[STORE] ✅ Vinculado exitosamente a global.conn mediante Auto-Bind');
+    }
+}, 1000);
 
 export default store;
