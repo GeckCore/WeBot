@@ -6,17 +6,18 @@ const execPromise = util.promisify(exec);
 
 module.exports = {
     name: 'downloads',
-    match: (text) => /^(https?:\/\/[^\s]+)$/i.test(text) && !text.toLowerCase().includes('resume'),
+    // Regex estricto: Solo reacciona si el link es de instagram o tiktok (y sus variantes)
+    match: (text) => /^(https?:\/\/(www\.)?(instagram\.com|tiktok\.com|vm\.tiktok\.com|vt\.tiktok\.com)\/[^\s]+)$/i.test(text) && !text.toLowerCase().includes('resume'),
+    
     execute: async ({ sock, remitente, textoLimpio }) => {
-        const urlMatch = textoLimpio.match(/^(https?:\/\/[^\s]+)$/i);
+        const urlMatch = textoLimpio.match(/^(https?:\/\/(www\.)?(instagram\.com|tiktok\.com|vm\.tiktok\.com|vt\.tiktok\.com)\/[^\s]+)$/i);
         if (!urlMatch) return;
         
         let urlLimpia = urlMatch[1].split(/[?&]si=/)[0].split(/[&?]feature=/)[0];
         let statusMsg = await sock.sendMessage(remitente, { text: "⏳ Procesando enlace..." });
 
-        const isAudio = ['soundcloud.com', 'spotify.com', 'tidal.com', 'deezer.com', 'apple.com/music'].some(d => urlLimpia.includes(d));
         const outName = path.join(__dirname, `../dl_${Date.now()}`);
-        const ext = isAudio ? 'wav' : 'mp4';
+        const ext = 'mp4'; // IG y TikTok se procesan siempre como video
         
         const ytDlpPath = path.join(__dirname, '../yt-dlp');
         const ffmpegPath = path.join(__dirname, '../ffmpeg');
@@ -27,10 +28,7 @@ module.exports = {
             if (fs.existsSync(igCookies)) cookieArg = `--cookies "${igCookies}"`;
         }
 
-        const format = isAudio 
-            ? `-f "bestaudio/best" -x --audio-format wav` 
-            : `-f "bestvideo+bestaudio/best" --merge-output-format mp4`;
-
+        const format = `-f "bestvideo+bestaudio/best" --merge-output-format mp4`;
         const cmd = `${ytDlpPath} ${cookieArg} --ffmpeg-location "${ffmpegPath}" --no-playlist --no-warnings --geo-bypass -o "${outName}.%(ext)s" ${format} "${urlLimpia}"`;
 
         let success = false;
@@ -48,8 +46,8 @@ module.exports = {
 
         if (!success) {
             let errorMensaje = "❌ Error al procesar el enlace.";
-            if (lastError.includes("format not available")) {
-                errorMensaje = "❌ Error: Formato no disponible.";
+            if (lastError.includes("format not available") || lastError.includes("Video unavailable")) {
+                errorMensaje = "❌ Error: El vídeo es privado, fue eliminado o el formato no está disponible.";
             } else {
                 errorMensaje = `❌ Error técnico:\n${lastError.substring(0, 150)}`;
             }
@@ -62,20 +60,18 @@ module.exports = {
 
         if (fileSizeInMB > 50) {
             fs.unlinkSync(finalFile);
-            return sock.sendMessage(remitente, { text: `⚠️ El archivo pesa ${fileSizeInMB.toFixed(1)}MB. Límite: 50MB.`, edit: statusMsg.key });
+            return sock.sendMessage(remitente, { text: `⚠️ El archivo pesa ${fileSizeInMB.toFixed(1)}MB. Límite de WhatsApp: 50MB.`, edit: statusMsg.key });
         }
 
         try {
             await sock.sendMessage(remitente, { text: "🚀 Enviando...", edit: statusMsg.key });
             
-            const payload = isAudio 
-                ? { document: { url: finalFile }, mimetype: 'audio/wav', fileName: `Audio_${Date.now()}.wav` } 
-                : { video: { url: finalFile }, mimetype: 'video/mp4' };
+            const payload = { video: { url: finalFile }, mimetype: 'video/mp4' };
 
             await sock.sendMessage(remitente, payload);
             await sock.sendMessage(remitente, { delete: statusMsg.key });
         } catch (sendError) {
-            await sock.sendMessage(remitente, { text: "❌ Error al subir a WhatsApp.", edit: statusMsg.key });
+            await sock.sendMessage(remitente, { text: "❌ Error al subir el vídeo a WhatsApp.", edit: statusMsg.key });
         } finally {
             if (fs.existsSync(finalFile)) fs.unlinkSync(finalFile);
         }
