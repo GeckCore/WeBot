@@ -12,14 +12,13 @@ module.exports = {
         const urlMatch = textoLimpio.match(/^ig\s+(https?:\/\/(www\.)?instagram\.com\/[^\s]+)$/i);
         if (!urlMatch) return;
 
-        // Limpiar todos los parámetros de la URL, dejar solo la base
         let urlLimpia = urlMatch[1].split('?')[0];
-        // Asegurarse de que termina con /
         if (!urlLimpia.endsWith('/')) urlLimpia += '/';
 
         let statusMsg = await sock.sendMessage(remitente, { text: "⏳ Procesando historia de Instagram..." });
 
-        const outName = path.join(__dirname, `../ig_${Date.now()}`);
+        const outDir = path.join(__dirname, '../');
+        const outBaseName = `ig_${Date.now()}`;
         const ytDlpPath = path.join(__dirname, '../yt-dlp');
         const ffmpegPath = path.join(__dirname, '../ffmpeg');
         const igCookies = path.join(__dirname, '../instagram_cookies.txt');
@@ -27,13 +26,13 @@ module.exports = {
 
         if (!fs.existsSync(igCookies)) {
             return sock.sendMessage(remitente, {
-                text: "❌ No se encontró el archivo de cookies. Necesario para descargar historias.",
+                text: "❌ No se encontró el archivo de cookies.",
                 edit: statusMsg.key
             });
         }
 
         const cookieArg = `--cookies "${igCookies}"`;
-        const cmd = `${ytDlpPath} ${cookieArg} --ffmpeg-location "${ffmpegPath}" --no-playlist --no-warnings --geo-bypass -o "${outName}.%(ext)s" "${urlLimpia}"`;
+        const cmd = `${ytDlpPath} ${cookieArg} --ffmpeg-location "${ffmpegPath}" --no-playlist --no-warnings --geo-bypass -P "${outDir}" -o "${outBaseName}.%(ext)s" "${urlLimpia}"`;
 
         let success = false;
         let finalFile = null;
@@ -42,55 +41,40 @@ module.exports = {
         try {
             const { stdout, stderr } = await execPromise(cmd);
 
-            fs.writeFileSync(logPath, JSON.stringify({
-                urlLimpia: urlLimpia,
-                cmd: cmd,
-                stdout: stdout,
-                stderr: stderr
-            }, null, 2));
+            await new Promise(r => setTimeout(r, 1000));
 
-            const dir = path.dirname(outName);
-            const baseName = path.basename(outName);
-            const archivos = fs.readdirSync(dir).filter(f => f.startsWith(baseName));
+            fs.writeFileSync(logPath, JSON.stringify({ urlLimpia, cmd, stdout, stderr }, null, 2));
+
+            const archivos = fs.readdirSync(outDir).filter(f => f.startsWith(outBaseName));
 
             if (archivos.length > 0) {
-                finalFile = path.join(dir, archivos[0]);
+                finalFile = path.join(outDir, archivos[0]);
                 success = true;
             } else {
-                lastError = `yt-dlp no generó archivo.\nSTDOUT: ${stdout}\nSTDERR: ${stderr}`;
+                const todos = fs.readdirSync(outDir).filter(f => f.startsWith('ig_'));
+                lastError = `No se encontró archivo.\nBuscado: ${outBaseName}\nArchivos ig_ existentes: ${JSON.stringify(todos)}\nSTDOUT: ${stdout}\nSTDERR: ${stderr}`;
             }
 
         } catch (e) {
-            lastError = e.stderr || e.stdout || e.message || "Error desconocido (vacío)";
-
+            lastError = e.stderr || e.stdout || e.message || "Error desconocido";
             fs.writeFileSync(logPath, JSON.stringify({
-                urlLimpia: urlLimpia,
-                cmd: cmd,
+                urlLimpia, cmd,
                 message: e.message,
                 stderr: e.stderr,
                 stdout: e.stdout,
                 code: e.code
             }, null, 2));
-
-            const dir = path.dirname(outName);
-            const baseName = path.basename(outName);
-            const archivos = fs.readdirSync(dir).filter(f => f.startsWith(baseName));
-            if (archivos.length > 0) {
-                for (const f of archivos) fs.unlinkSync(path.join(dir, f));
-            }
         }
 
         if (!success || !finalFile) {
             let errorMensaje = "";
-
             if (lastError.includes("login") || lastError.includes("authentication") || lastError.includes("cookie")) {
-                errorMensaje = "❌ Las cookies han expirado o son inválidas. Actualiza instagram_cookies.txt";
+                errorMensaje = "❌ Las cookies han expirado o son inválidas.";
             } else if (lastError.includes("Video unavailable") || lastError.includes("Private")) {
                 errorMensaje = "❌ Historia privada, expirada o no disponible.";
             } else {
-                errorMensaje = `❌ Error técnico:\n[${lastError.substring(0, 300)}]`;
+                errorMensaje = `❌ Error técnico:\n[${lastError.substring(0, 500)}]`;
             }
-
             return sock.sendMessage(remitente, { text: errorMensaje, edit: statusMsg.key });
         }
 
