@@ -4,7 +4,7 @@ const path = require('path');
 
 module.exports = {
     name: 'igstalk_hardened',
-    match: (text) => /^(\.)?(igstalk|ig)\s+.+$/i.test(text),
+    match: (text) => /^(\.)?(igstalk)\s+.+$/i.test(text),
 
     execute: async ({ sock, remitente, msg, textoLimpio }) => {
         const user = textoLimpio.split(/\s+/)[1].replace(/^@/, '');
