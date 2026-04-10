@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import zlib from 'zlib';
 import FormData from 'form-data';
 
 export default {
@@ -42,7 +43,7 @@ export default {
             await sock.sendMessage(remitente, { text: tradutor.texto3 }, { quoted: msg });
 
             const buffer = await downloadImage(imageNode, downloadContentFromMessage);
-            const hdBuffer = await remini(buffer, 'enhance');
+            const hdBuffer = await remini(buffer);
 
             await sock.sendMessage(
                 remitente,
@@ -51,9 +52,12 @@ export default {
             );
 
         } catch (e) {
-            console.error('[HD] Error:', e);
-            const errorMessage = e.message || 'Error desconocido';
-            await sock.sendMessage(remitente, { text: tradutor.texto4 + errorMessage }, { quoted: msg });
+            console.error('[HD] Error:', e.message);
+            await sock.sendMessage(
+                remitente,
+                { text: tradutor.texto4 + (e.message || 'Error desconocido') },
+                { quoted: msg }
+            );
         }
     }
 };
@@ -87,22 +91,17 @@ function findImageNode(msg) {
 async function downloadImage(imageNode, downloadContentFromMessage) {
     const stream = await downloadContentFromMessage(imageNode, 'image');
     const chunks = [];
-
     await new Promise((resolve, reject) => {
         stream.on('data', (chunk) => chunks.push(chunk));
         stream.on('end', resolve);
         stream.on('error', reject);
     });
-
     const buffer = Buffer.concat(chunks);
-    if (buffer.length === 0) throw new Error('No se pudo descargar la imagen de WhatsApp.');
+    if (buffer.length === 0) throw new Error('No se pudo descargar la imagen.');
     return buffer;
 }
 
-function remini(imageData, operation = 'enhance') {
-    const validOps = ['enhance', 'recolor', 'dehaze'];
-    if (!validOps.includes(operation)) operation = 'enhance';
-
+function remini(imageData) {
     return new Promise((resolve, reject) => {
         const formData = new FormData();
         formData.append('image', Buffer.from(imageData), {
@@ -116,9 +115,8 @@ function remini(imageData, operation = 'enhance') {
 
         formData.submit(
             {
-                url: `https://inferenceengine.vyro.ai/${operation}`,
                 host: 'inferenceengine.vyro.ai',
-                path: `/${operation}`,
+                path: '/enhance',
                 protocol: 'https:',
                 headers: {
                     'User-Agent': 'okhttp/4.9.3',
@@ -127,12 +125,25 @@ function remini(imageData, operation = 'enhance') {
                 }
             },
             (err, res) => {
-                if (err) return reject(err);
+                if (err) return reject(new Error('Error conectando a Vyro: ' + err.message));
 
                 const chunks = [];
                 res.on('data', (chunk) => chunks.push(chunk));
-                res.on('end', () => resolve(Buffer.concat(chunks)));
-                res.on('error', (err) => reject(err));
+                res.on('error', (e) => reject(new Error('Error leyendo respuesta: ' + e.message)));
+                res.on('end', () => {
+                    const raw = Buffer.concat(chunks);
+
+                    // Descomprimir gzip si es necesario
+                    const isGzip = raw[0] === 0x1f && raw[1] === 0x8b;
+                    if (isGzip) {
+                        zlib.gunzip(raw, (err, decompressed) => {
+                            if (err) return reject(new Error('Error descomprimiendo gzip: ' + err.message));
+                            resolve(decompressed);
+                        });
+                    } else {
+                        resolve(raw);
+                    }
+                });
             }
         );
     });
