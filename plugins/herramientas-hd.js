@@ -1,14 +1,11 @@
-import axios from 'axios';
-import FormData from 'form-data';
-import { fileTypeFromBuffer } from 'file-type';
+import Jimp from 'jimp';
 
 export default {
     name: 'mejorar_hd',
-    // Captura .hd, .remini, .upscale o .enhance
     match: (text) => /^\.(hd|remini|upscale|enhance)$/i.test(text),
 
     execute: async ({ sock, remitente, msg, quoted, downloadContentFromMessage }) => {
-        // 1. Detección profunda de la imagen (Soporta imágenes normales y efímeras "Ver una vez")
+        // 1. Detección profunda de la imagen
         const q = quoted || msg.message;
         
         const findImageNode = (obj) => {
@@ -27,97 +24,44 @@ export default {
 
         const mime = imageNode.mimetype || "";
         if (!/image\/(jpe?g|png)/.test(mime)) {
-            return sock.sendMessage(remitente, { text: `❌ El formato detectado (${mime}) no es compatible. Solo JPG o PNG.` }, { quoted: msg });
+            return sock.sendMessage(remitente, { text: `❌ Formato (${mime}) no compatible. Solo JPG o PNG.` }, { quoted: msg });
         }
 
-        let statusMsg = await sock.sendMessage(remitente, { text: '⏳ *Analizando y mejorando calidad (Upscale)...*\nEsto puede tardar entre 10 y 30 segundos.' }, { quoted: msg });
+        let statusMsg = await sock.sendMessage(remitente, { text: '⏳ *Procesando en local...*' }, { quoted: msg });
 
         try {
-            // 2. Descargar la imagen desde los servidores de WhatsApp de manera controlada sin afectar a sharp
-            let buffer;
-            try {
-              const stream = await downloadContentFromMessage(imageNode, 'image');
-              let buffers = [];
-              for await (const chunk of stream) buffers.push(chunk);
-              buffer = Buffer.concat(buffers);
-            } catch (err) {
-               throw new Error("No se pudo extraer el archivo. Es posible que el servidor de WhatsApp eliminara la imagen.");
-            }
+            // 2. Descargar la imagen de los servidores de WhatsApp
+            const stream = await downloadContentFromMessage(imageNode, 'image');
+            let buffers = [];
+            for await (const chunk of stream) buffers.push(chunk);
+            const buffer = Buffer.concat(buffers);
 
-            if (!buffer || buffer.length === 0) throw new Error("Fallo al descargar la imagen original.");
+            if (buffer.length === 0) throw new Error("Fallo al descargar la imagen original.");
 
-            // 3. Subir a Catbox para obtener un enlace directo (Bypass antibot)
-            const imageUrl = await uploadToCatbox(buffer);
-            
-            // 4. Procesar el Upscale con doble sistema de respaldo
-            const hdImageBuffer = await upscaleImage(imageUrl);
+            // 3. Procesamiento 100% Local con Jimp (Cero APIs externas)
+            const image = await Jimp.read(buffer);
 
-            // 5. Enviar el resultado y borrar el mensaje de espera
+            // Escalado Bicúbico x2, aumento de contraste sutil y normalización de color
+            image.scale(2, Jimp.RESIZE_BICUBIC);
+            image.contrast(0.1); 
+            image.normalize();
+
+            // Exportar a Buffer JPEG con alta calidad
+            const hdBuffer = await image.getBufferAsync(Jimp.MIME_JPEG);
+
+            // 4. Enviar resultado evadiendo el crasheo interno de Sharp
             await sock.sendMessage(remitente, { 
-                image: hdImageBuffer, 
-                caption: '✨ *Imagen mejorada con IA*' 
+                image: hdBuffer, 
+                caption: '✨ *Calidad mejorada (Local)*',
+                // FIX CRÍTICO: Esto evita que Baileys llame a sharp internamente
+                thumbnail: Buffer.alloc(0) 
             }, { quoted: msg });
             
             await sock.sendMessage(remitente, { delete: statusMsg.key });
 
         } catch (e) {
-            console.error('[PLUGIN HD] Error:', e);
-            const errorMessage = e.response?.data?.message || e.message || 'Saturación en los servidores de IA.';
-            await sock.sendMessage(remitente, { text: `❌ *Error técnico:*\n${errorMessage}`, edit: statusMsg.key });
+            console.error('[PLUGIN HD] Error Local:', e);
+            await sock.sendMessage(remitente, { text: `❌ *Error de procesamiento:*\n${e.message}` }, { edit: statusMsg.key });
         }
     }
 };
-
-/**
- * Sube un buffer a Catbox.moe (Estable para VPS y no banea rangos IP como Telegraph)
- */
-async function uploadToCatbox(buffer) {
-    const ft = await fileTypeFromBuffer(buffer);
-    if (!ft) throw new Error('No se pudo determinar la extensión del archivo.');
-    
-    const form = new FormData();
-    form.append('reqtype', 'fileupload');
-    form.append('fileToUpload', buffer, { 
-        filename: `upscale.${ft.ext}`, 
-        contentType: ft.mime 
-    });
-    
-    const res = await axios.post('https://catbox.moe/user/api.php', form, {
-        headers: {
-            ...form.getHeaders(),
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/119.0.0.0 Safari/537.36'
-        }
-    });
-    
-    if (typeof res.data !== 'string' || !res.data.includes('https')) {
-        throw new Error('Fallo en el servidor de Catbox: ' + res.data);
-    }
-    
-    return res.data.trim();
-}
-
-/**
- * Aplica el filtro HD (Real-ESRGAN/Remini) mediante APIs gratuitas.
- * Incluye fallback para máxima fiabilidad.
- */
-async function upscaleImage(url) {
-    try {
-        // Intento 1: Siputzx (Rápido y procesa x4)
-        const { data } = await axios.get(`https://api.siputzx.my.id/api/tools/remini?url=${url}`, {
-            responseType: "arraybuffer",
-            headers: { "accept": "image/*" },
-            timeout: 25000 // 25s max
-        });
-        return Buffer.from(data);
-    } catch (err1) {
-        console.log('[PLUGIN HD] Siputzx falló o tardó demasiado, intentando respaldo...');
-        
-        // Intento 2: Ryzendesu (Alternativa muy estable)
-        const { data } = await axios.get(`https://api.ryzendesu.vip/api/ai/remini?url=${url}`, {
-            responseType: "arraybuffer",
-            headers: { "accept": "image/*", "User-Agent": "Mozilla/5.0" },
-            timeout: 25000
-        });
-        return Buffer.from(data);
-    }
-}
