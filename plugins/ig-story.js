@@ -18,7 +18,6 @@ module.exports = {
         let statusMsg = await sock.sendMessage(remitente, { text: "⏳ Procesando historia de Instagram..." });
 
         const outDir = path.join(__dirname, '../');
-        const outBaseName = `ig_${Date.now()}`;
         const ytDlpPath = path.join(__dirname, '../yt-dlp');
         const ffmpegPath = path.join(__dirname, '../ffmpeg');
         const igCookies = path.join(__dirname, '../instagram_cookies.txt');
@@ -31,8 +30,11 @@ module.exports = {
             });
         }
 
+        // Snapshot de archivos ANTES de descargar
+        const archivosAntes = new Set(fs.readdirSync(outDir));
+
         const cookieArg = `--cookies "${igCookies}"`;
-        const cmd = `${ytDlpPath} ${cookieArg} --ffmpeg-location "${ffmpegPath}" --no-playlist --no-warnings --geo-bypass -P "${outDir}" -o "${outBaseName}.%(ext)s" "${urlLimpia}"`;
+        const cmd = `${ytDlpPath} ${cookieArg} --ffmpeg-location "${ffmpegPath}" --no-playlist --no-warnings --geo-bypass -P "${outDir}" -o "%(id)s.%(ext)s" "${urlLimpia}"`;
 
         let success = false;
         let finalFile = null;
@@ -45,14 +47,15 @@ module.exports = {
 
             fs.writeFileSync(logPath, JSON.stringify({ urlLimpia, cmd, stdout, stderr }, null, 2));
 
-            const archivos = fs.readdirSync(outDir).filter(f => f.startsWith(outBaseName));
+            // Archivos nuevos = los que no estaban antes
+            const archivosAhora = fs.readdirSync(outDir);
+            const archivosNuevos = archivosAhora.filter(f => !archivosAntes.has(f));
 
-            if (archivos.length > 0) {
-                finalFile = path.join(outDir, archivos[0]);
+            if (archivosNuevos.length > 0) {
+                finalFile = path.join(outDir, archivosNuevos[0]);
                 success = true;
             } else {
-                const todos = fs.readdirSync(outDir).filter(f => f.startsWith('ig_'));
-                lastError = `No se encontró archivo.\nBuscado: ${outBaseName}\nArchivos ig_ existentes: ${JSON.stringify(todos)}\nSTDOUT: ${stdout}\nSTDERR: ${stderr}`;
+                lastError = `yt-dlp no generó archivo nuevo.\nSTDOUT: ${stdout}\nSTDERR: ${stderr}`;
             }
 
         } catch (e) {
