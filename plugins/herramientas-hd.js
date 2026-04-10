@@ -33,12 +33,18 @@ export default {
         let statusMsg = await sock.sendMessage(remitente, { text: '⏳ *Analizando y mejorando calidad (Upscale)...*\nEsto puede tardar entre 10 y 30 segundos.' }, { quoted: msg });
 
         try {
-            // 2. Descargar la imagen desde los servidores de WhatsApp
-            const stream = await downloadContentFromMessage(imageNode, 'image');
-            let buffer = Buffer.from([]);
-            for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
+            // 2. Descargar la imagen desde los servidores de WhatsApp de manera controlada sin afectar a sharp
+            let buffer;
+            try {
+              const stream = await downloadContentFromMessage(imageNode, 'image');
+              let buffers = [];
+              for await (const chunk of stream) buffers.push(chunk);
+              buffer = Buffer.concat(buffers);
+            } catch (err) {
+               throw new Error("No se pudo extraer el archivo. Es posible que el servidor de WhatsApp eliminara la imagen.");
+            }
 
-            if (buffer.length === 0) throw new Error("Fallo al descargar la imagen original.");
+            if (!buffer || buffer.length === 0) throw new Error("Fallo al descargar la imagen original.");
 
             // 3. Subir a Catbox para obtener un enlace directo (Bypass antibot)
             const imageUrl = await uploadToCatbox(buffer);
