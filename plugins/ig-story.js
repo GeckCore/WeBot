@@ -39,23 +39,23 @@ module.exports = {
         let lastError = "";
 
         try {
-            await execPromise(cmd);
+    await execPromise(cmd);
 
-            // Buscar el archivo descargado (puede ser mp4, jpg, webp, etc.)
-            const posiblesExts = ['mp4', 'jpg', 'jpeg', 'webp', 'png'];
-            for (const ext of posiblesExts) {
-                if (fs.existsSync(`${outName}.${ext}`)) {
-                    finalFile = `${outName}.${ext}`;
-                    success = true;
-                    break;
-                }
-            }
-        } catch (e) {
-            lastError = e.stderr || e.message;
-        }
+    // Buscar CUALQUIER archivo descargado que empiece con el outName
+    const dir = path.dirname(outName);
+    const baseName = path.basename(outName);
+    const archivos = fs.readdirSync(dir).filter(f => f.startsWith(baseName));
+
+    if (archivos.length > 0) {
+        finalFile = path.join(dir, archivos[0]);
+        success = true;
+    }
+} catch (e) {
+    lastError = e.stderr || e.stdout || e.message || "Error desconocido";
+}
 
         if (!success || !finalFile) {
-            let errorMensaje = "❌ Error al procesar la historia.";
+let errorMensaje = `❌ Error al procesar la historia.\n\n${lastError || "Sin detalle de error. Puede que las cookies hayan expirado o la URL sea incorrecta."}`;
             if (lastError.includes("Video unavailable") || lastError.includes("Private")) {
                 errorMensaje = "❌ Historia privada, expirada o no disponible.";
             } else if (lastError.includes("login") || lastError.includes("authentication")) {
