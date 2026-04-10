@@ -30,17 +30,21 @@ module.exports = {
         }
 
         const cookieArg = `--cookies "${igCookies}"`;
-        // Usamos %(ext)s porque la historia puede ser un video (.mp4) o una foto (.jpg/.webp)
-        const cmd = `${ytDlpPath} ${cookieArg} --ffmpeg-location "${ffmpegPath}" --no-playlist --no-warnings -o "${outPrefix}.%(ext)s" "${urlLimpia}"`;
+        
+        // Igualado al comportamiento de Reels, pero usando "best" para que sirva tanto para video (.mp4) como fotos (.jpg)
+        // Esto evita que yt-dlp haga peticiones extra de comprobación que provocan el Error 429 de Instagram.
+        const format = `-f "best"`;
+        const cmd = `${ytDlpPath} ${cookieArg} --ffmpeg-location "${ffmpegPath}" --no-playlist --no-warnings --geo-bypass -o "${outPrefix}.%(ext)s" ${format} "${urlLimpia}"`;
 
         let success = false;
         let lastError = "";
         let finalFile = "";
 
         try {
-            await execPromise(cmd);
+            // maxBuffer aumentado a 10MB para evitar que el output ahogue a Node.js y desconecte Baileys
+            await execPromise(cmd, { maxBuffer: 1024 * 1024 * 10 });
             
-            // Buscar el archivo resultante en el directorio padre (ya que no sabemos la extensión exacta)
+            // Buscar el archivo resultante en el directorio padre
             const parentDir = path.join(__dirname, '../');
             const files = fs.readdirSync(parentDir);
             const downloadedFile = files.find(f => f.startsWith(`dl_story_${timestamp}`));
@@ -55,13 +59,17 @@ module.exports = {
 
         if (!success || !finalFile) {
             let errorMensaje = "❌ Error al descargar la historia.";
-            if (lastError.includes("Login required") || lastError.includes("Redirected to login")) {
+            
+            if (lastError.includes("HTTP Error 429")) {
+                errorMensaje = "❌ Error 429: Instagram ha bloqueado temporalmente la IP de la VPS o tus cookies por hacer demasiadas peticiones. Intenta más tarde.";
+            } else if (lastError.includes("Login required") || lastError.includes("Redirected to login")) {
                 errorMensaje = "❌ Error: Las cookies expiraron o Instagram bloqueó la sesión (Challenge Required). Debes renovar instagram_cookies.txt.";
             } else if (lastError.includes("No video formats")) {
                 errorMensaje = "❌ Error: Historia no disponible (pudo expirar o la cuenta es privada y tus cookies no la siguen).";
             } else {
                 errorMensaje = `❌ Error técnico:\n${lastError.substring(0, 150)}`;
             }
+            
             return sock.sendMessage(remitente, { text: errorMensaje, edit: statusMsg.key });
         }
 
