@@ -1,27 +1,2 @@
-/**
- * Mejora la imagen: primero intenta APIs externas, si fallan usa sharp local.
- * SIEMPRE convierte el resultado final a JPEG válido con sharp.
- */
-async function enhanceImage(buffer) {
-    let resultBuffer = null;
-
-    // 1. Intentar APIs externas
-    try {
-        const url = await uploadToCatbox(buffer);
-        resultBuffer = await tryRemoteApis(url);
-    } catch (err) {
-        console.warn('[HD] APIs remotas fallaron, usando mejora local:', err.message);
-    }
-
-    // 2. Si las APIs fallaron o devolvieron basura, usar sharp local
-    if (!resultBuffer) {
-        resultBuffer = await enhanceWithSharp(buffer);
-    }
-
-    // 3. SIEMPRE sanitizar a JPEG válido antes de enviar (evita error de Baileys)
-    const finalBuffer = await sharp(resultBuffer)
-        .toFormat('jpeg', { quality: 92 })
-        .toBuffer();
-
-    return finalBuffer;
-}
+[HD] Falló API primaria, intentando respaldo...
+{"level":40,"time":"2026-04-10T21:53:46.502Z","pid":56,"hostname":"22364185-6e74-4b05-b943-93b4dc59a63e","class":"baileys","msgId":"3EB0F42A7E6568CEF47766","trace":"Error: Input file contains unsupported image format\n    at Sharp.metadata (/home/container/node_modules/sharp/lib/input.js:637:17)\n    at extractImageThumb (file:///home/container/node_modules/@whiskeysockets/baileys/src/Utils/messages-media.ts:144:32)\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async generateThumbnail (file:///home/container/node_modules/@whiskeysockets/baileys/src/Utils/messages-media.ts:337:32)\n    at async file:///home/container/node_modules/@whiskeysockets/baileys/src/Utils/messages.ts:245:53\n    at async Promise.all (index 1)\n    at async prepareWAMessageMedia (file:///home/container/node_modules/@whiskeysockets/baileys/src/Utils/messages.ts:232:37)\n    at async generateWAMessageContent (file:///home/container/node_modules/@whiskeysockets/baileys/src/Utils/messages.ts:580:7)\n    at async generateWAMessage (file:///home/container/node_modules/@whiskeysockets/baileys/src/Utils/messages.ts:711:43)\n    at async Object.sendMessage (file:///home/container/node_modules/@whiskeysockets/baileys/src/Socket/messages-send.ts:1136:21)","msg":"failed to obtain extra info"}
