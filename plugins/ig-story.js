@@ -12,7 +12,11 @@ module.exports = {
         const urlMatch = textoLimpio.match(/^ig\s+(https?:\/\/(www\.)?instagram\.com\/[^\s]+)$/i);
         if (!urlMatch) return;
 
-        let urlLimpia = urlMatch[1].split(/[?&]si=/)[0].split(/[&?]feature=/)[0];
+        // Limpiar todos los parámetros de la URL, dejar solo la base
+        let urlLimpia = urlMatch[1].split('?')[0];
+        // Asegurarse de que termina con /
+        if (!urlLimpia.endsWith('/')) urlLimpia += '/';
+
         let statusMsg = await sock.sendMessage(remitente, { text: "⏳ Procesando historia de Instagram..." });
 
         const outName = path.join(__dirname, `../ig_${Date.now()}`);
@@ -36,7 +40,14 @@ module.exports = {
         let lastError = "";
 
         try {
-            await execPromise(cmd);
+            const { stdout, stderr } = await execPromise(cmd);
+
+            fs.writeFileSync(logPath, JSON.stringify({
+                urlLimpia: urlLimpia,
+                cmd: cmd,
+                stdout: stdout,
+                stderr: stderr
+            }, null, 2));
 
             const dir = path.dirname(outName);
             const baseName = path.basename(outName);
@@ -46,18 +57,19 @@ module.exports = {
                 finalFile = path.join(dir, archivos[0]);
                 success = true;
             } else {
-                lastError = "yt-dlp no generó ningún archivo.";
+                lastError = `yt-dlp no generó archivo.\nSTDOUT: ${stdout}\nSTDERR: ${stderr}`;
             }
 
         } catch (e) {
             lastError = e.stderr || e.stdout || e.message || "Error desconocido (vacío)";
 
             fs.writeFileSync(logPath, JSON.stringify({
+                urlLimpia: urlLimpia,
+                cmd: cmd,
                 message: e.message,
                 stderr: e.stderr,
                 stdout: e.stdout,
-                code: e.code,
-                cmd: cmd
+                code: e.code
             }, null, 2));
 
             const dir = path.dirname(outName);
