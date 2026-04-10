@@ -1,2 +1,139 @@
-[HD] Falló API primaria, intentando respaldo...
-{"level":40,"time":"2026-04-10T21:53:46.502Z","pid":56,"hostname":"22364185-6e74-4b05-b943-93b4dc59a63e","class":"baileys","msgId":"3EB0F42A7E6568CEF47766","trace":"Error: Input file contains unsupported image format\n    at Sharp.metadata (/home/container/node_modules/sharp/lib/input.js:637:17)\n    at extractImageThumb (file:///home/container/node_modules/@whiskeysockets/baileys/src/Utils/messages-media.ts:144:32)\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async generateThumbnail (file:///home/container/node_modules/@whiskeysockets/baileys/src/Utils/messages-media.ts:337:32)\n    at async file:///home/container/node_modules/@whiskeysockets/baileys/src/Utils/messages.ts:245:53\n    at async Promise.all (index 1)\n    at async prepareWAMessageMedia (file:///home/container/node_modules/@whiskeysockets/baileys/src/Utils/messages.ts:232:37)\n    at async generateWAMessageContent (file:///home/container/node_modules/@whiskeysockets/baileys/src/Utils/messages.ts:580:7)\n    at async generateWAMessage (file:///home/container/node_modules/@whiskeysockets/baileys/src/Utils/messages.ts:711:43)\n    at async Object.sendMessage (file:///home/container/node_modules/@whiskeysockets/baileys/src/Socket/messages-send.ts:1136:21)","msg":"failed to obtain extra info"}
+import fs from 'fs';
+import path from 'path';
+import FormData from 'form-data';
+
+export default {
+    name: 'remini_hd',
+    match: (text) => /^\.(remini|hd|enhance)$/i.test(text),
+
+    execute: async ({ sock, remitente, msg, downloadContentFromMessage }) => {
+        const user = global.db.data.users[msg.sender] || {};
+        const idioma = user.language || 'es';
+
+        let tradutor;
+        try {
+            const pathLang = path.join(process.cwd(), 'src', 'languages', `${idioma}.json`);
+            const _translate = JSON.parse(fs.readFileSync(pathLang, 'utf8'));
+            tradutor = _translate.plugins.herramientas_hd;
+        } catch {
+            tradutor = {
+                texto1: '⚠️ Responde a una imagen o envía una con el comando.',
+                texto2: ['❌ Formato no compatible', 'solo jpg/png'],
+                texto3: '⏳ *Mejorando imagen... espera unos segundos.*',
+                texto4: '❌ Error: '
+            };
+        }
+
+        try {
+            const imageNode = findImageNode(msg);
+            if (!imageNode) {
+                return sock.sendMessage(remitente, { text: tradutor.texto1 }, { quoted: msg });
+            }
+
+            const mime = imageNode.mimetype || '';
+            if (!/image\/(jpe?g|png)/.test(mime)) {
+                return sock.sendMessage(
+                    remitente,
+                    { text: `${tradutor.texto2[0]} (${mime}) ${tradutor.texto2[1]}` },
+                    { quoted: msg }
+                );
+            }
+
+            await sock.sendMessage(remitente, { text: tradutor.texto3 }, { quoted: msg });
+
+            const buffer = await downloadImage(imageNode, downloadContentFromMessage);
+            const hdBuffer = await remini(buffer, 'enhance');
+
+            await sock.sendMessage(
+                remitente,
+                { image: hdBuffer, caption: '✨ *Imagen mejorada con IA*' },
+                { quoted: msg }
+            );
+
+        } catch (e) {
+            console.error('[HD] Error:', e);
+            const errorMessage = e.message || 'Error desconocido';
+            await sock.sendMessage(remitente, { text: tradutor.texto4 + errorMessage }, { quoted: msg });
+        }
+    }
+};
+
+function findImageNode(msg) {
+    const m = msg.message;
+    if (!m) return null;
+
+    if (m.imageMessage) return m.imageMessage;
+    if (m.viewOnceMessage?.message?.imageMessage)
+        return m.viewOnceMessage.message.imageMessage;
+    if (m.viewOnceMessageV2?.message?.imageMessage)
+        return m.viewOnceMessageV2.message.imageMessage;
+    if (m.viewOnceMessageV2Extension?.message?.imageMessage)
+        return m.viewOnceMessageV2Extension.message.imageMessage;
+
+    const quoted = m.extendedTextMessage?.contextInfo?.quotedMessage;
+    if (quoted) {
+        if (quoted.imageMessage) return quoted.imageMessage;
+        if (quoted.viewOnceMessage?.message?.imageMessage)
+            return quoted.viewOnceMessage.message.imageMessage;
+        if (quoted.viewOnceMessageV2?.message?.imageMessage)
+            return quoted.viewOnceMessageV2.message.imageMessage;
+        if (quoted.viewOnceMessageV2Extension?.message?.imageMessage)
+            return quoted.viewOnceMessageV2Extension.message.imageMessage;
+    }
+
+    return null;
+}
+
+async function downloadImage(imageNode, downloadContentFromMessage) {
+    const stream = await downloadContentFromMessage(imageNode, 'image');
+    const chunks = [];
+
+    await new Promise((resolve, reject) => {
+        stream.on('data', (chunk) => chunks.push(chunk));
+        stream.on('end', resolve);
+        stream.on('error', reject);
+    });
+
+    const buffer = Buffer.concat(chunks);
+    if (buffer.length === 0) throw new Error('No se pudo descargar la imagen de WhatsApp.');
+    return buffer;
+}
+
+function remini(imageData, operation = 'enhance') {
+    const validOps = ['enhance', 'recolor', 'dehaze'];
+    if (!validOps.includes(operation)) operation = 'enhance';
+
+    return new Promise((resolve, reject) => {
+        const formData = new FormData();
+        formData.append('image', Buffer.from(imageData), {
+            filename: 'enhance_image_body.jpg',
+            contentType: 'image/jpeg'
+        });
+        formData.append('model_version', 1, {
+            'Content-Transfer-Encoding': 'binary',
+            contentType: 'multipart/form-data; charset=utf-8'
+        });
+
+        formData.submit(
+            {
+                url: `https://inferenceengine.vyro.ai/${operation}`,
+                host: 'inferenceengine.vyro.ai',
+                path: `/${operation}`,
+                protocol: 'https:',
+                headers: {
+                    'User-Agent': 'okhttp/4.9.3',
+                    'Connection': 'Keep-Alive',
+                    'Accept-Encoding': 'gzip'
+                }
+            },
+            (err, res) => {
+                if (err) return reject(err);
+
+                const chunks = [];
+                res.on('data', (chunk) => chunks.push(chunk));
+                res.on('end', () => resolve(Buffer.concat(chunks)));
+                res.on('error', (err) => reject(err));
+            }
+        );
+    });
+}
