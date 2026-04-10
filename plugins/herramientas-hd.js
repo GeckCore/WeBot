@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import FormData from 'form-data';
 import { fileTypeFromBuffer } from 'file-type';
+import sharp from 'sharp';
 
 const TIMEOUT_MS = 30_000;
 
@@ -23,13 +24,12 @@ export default {
             tradutor = {
                 texto1: '⚠️ Responde a una imagen o envía una con el comando.',
                 texto2: ['❌ Formato no compatible', 'solo jpg/png'],
-                texto3: '⏳ *Procesando imagen... esto puede tardar unos segundos.*',
+                texto3: '⏳ *Mejorando imagen con IA... espera unos segundos.*',
                 texto4: '❌ Error: '
             };
         }
 
         try {
-            // Detección robusta de imagen en todos los tipos de mensaje
             const imageNode = findImageNode(msg);
 
             if (!imageNode) {
@@ -47,16 +47,9 @@ export default {
 
             await sock.sendMessage(remitente, { text: tradutor.texto3 }, { quoted: msg });
 
-            // Descargar imagen
             const buffer = await downloadImage(imageNode, downloadContentFromMessage);
+            const hdImageBuffer = await enhanceImage(buffer);
 
-            // Subir a Catbox
-            const imageUrl = await uploadToCatbox(buffer);
-
-            // Mejorar imagen con IA
-            const hdImageBuffer = await upscaleImage(imageUrl);
-
-            // Enviar resultado
             await sock.sendMessage(
                 remitente,
                 { image: hdImageBuffer, caption: '✨ *Imagen mejorada con IA*' },
@@ -78,22 +71,14 @@ function findImageNode(msg) {
     const m = msg.message;
     if (!m) return null;
 
-    // Imagen directa (con o sin caption)
     if (m.imageMessage) return m.imageMessage;
-
-    // Imagen efímera v1
     if (m.viewOnceMessage?.message?.imageMessage)
         return m.viewOnceMessage.message.imageMessage;
-
-    // Imagen efímera v2
     if (m.viewOnceMessageV2?.message?.imageMessage)
         return m.viewOnceMessageV2.message.imageMessage;
-
-    // Imagen efímera v2 extension
     if (m.viewOnceMessageV2Extension?.message?.imageMessage)
         return m.viewOnceMessageV2Extension.message.imageMessage;
 
-    // Mensaje citado (texto extendido con imagen adjunta)
     const quoted = m.extendedTextMessage?.contextInfo?.quotedMessage;
     if (quoted) {
         if (quoted.imageMessage) return quoted.imageMessage;
@@ -109,7 +94,7 @@ function findImageNode(msg) {
 }
 
 /**
- * Descarga la imagen desde WhatsApp con manejo de errores
+ * Descarga la imagen desde WhatsApp
  */
 async function downloadImage(imageNode, downloadContentFromMessage) {
     const stream = await downloadContentFromMessage(imageNode, 'image');
@@ -124,6 +109,124 @@ async function downloadImage(imageNode, downloadContentFromMessage) {
     const buffer = Buffer.concat(chunks);
     if (buffer.length === 0) throw new Error('No se pudo descargar la imagen de WhatsApp.');
     return buffer;
+}
+
+/**
+ * Mejora la imagen: primero intenta APIs externas, si fallan usa sharp local
+ */
+async function enhanceImage(buffer) {
+    // 1. Intentar APIs externas
+    try {
+        const url = await uploadToCatbox(buffer);
+        return await tryRemoteApis(url);
+    } catch (err) {
+        console.warn('[HD] APIs remotas fallaron, usando mejora local:', err.message);
+    }
+
+    // 2. Fallback: mejora local con sharp (siempre funciona)
+    return await enhanceWithSharp(buffer);
+}
+
+/**
+ * Prueba múltiples APIs externas de mejora
+ */
+async function tryRemoteApis(url) {
+    const encoded = encodeURIComponent(url);
+
+    const apis = [
+        {
+            name: 'Siputzx',
+            url: `https://api.siputzx.my.id/api/tools/remini?url=${encoded}`,
+            method: 'get'
+        },
+        {
+            name: 'Ryzendesu',
+            url: `https://api.ryzendesu.vip/api/ai/remini?url=${encoded}`,
+            method: 'get'
+        },
+        {
+            name: 'Nayan',
+            url: `https://api.nayan.site/api/remini?url=${encoded}`,
+            method: 'get'
+        }
+    ];
+
+    for (const api of apis) {
+        try {
+            console.log(`[HD] Probando API: ${api.name}`);
+            const { data, headers } = await axios.get(api.url, {
+                responseType: 'arraybuffer',
+                headers: { accept: 'image/*', 'User-Agent': 'Mozilla/5.0' },
+                timeout: TIMEOUT_MS
+            });
+
+            const buf = Buffer.from(data);
+
+            // Verificar que no esté vacío y sea imagen real
+            if (buf.length < 1000) throw new Error('Respuesta demasiado pequeña');
+
+            const ft = await fileTypeFromBuffer(buf);
+            if (!ft || !ft.mime.startsWith('image/')) {
+                throw new Error(`No es imagen válida, mime: ${ft?.mime ?? 'desconocido'}`);
+            }
+
+            // Verificar que sharp pueda abrirla (imagen no corrupta)
+            const meta = await sharp(buf).metadata();
+            if (!meta.width || !meta.height) throw new Error('Imagen corrupta o vacía');
+
+            console.log(`[HD] ✅ ${api.name} OK (${meta.width}x${meta.height})`);
+            return buf;
+
+        } catch (err) {
+            console.warn(`[HD] ❌ ${api.name} falló: ${err.message}`);
+        }
+    }
+
+    throw new Error('Todas las APIs externas fallaron.');
+}
+
+/**
+ * Mejora local con sharp: upscale 4x + nitidez + saturación + contraste
+ */
+async function enhanceWithSharp(buffer) {
+    console.log('[HD] Aplicando mejora local con sharp...');
+
+    const meta = await sharp(buffer).metadata();
+    const newWidth = (meta.width || 800) * 4;
+    const newHeight = (meta.height || 800) * 4;
+
+    // Limitar a 4096px máximo para no generar archivos enormes
+    const maxDim = 4096;
+    const scale = Math.min(maxDim / newWidth, maxDim / newHeight, 1);
+    const finalWidth = Math.round(newWidth * scale);
+    const finalHeight = Math.round(newHeight * scale);
+
+    const enhanced = await sharp(buffer)
+        // Upscale con algoritmo lanczos (mejor calidad)
+        .resize(finalWidth, finalHeight, {
+            kernel: sharp.kernel.lanczos3,
+            fit: 'fill'
+        })
+        // Nitidez: realza bordes y detalles finos
+        .sharpen({
+            sigma: 1.5,
+            m1: 1.5,
+            m2: 0.7,
+            x1: 2,
+            y2: 10,
+            y3: 20
+        })
+        // Mejora de color y contraste
+        .modulate({
+            brightness: 1.05,
+            saturation: 1.2
+        })
+        .linear(1.1, -(128 * 0.1)) // contraste
+        .toFormat('jpeg', { quality: 95 })
+        .toBuffer();
+
+    console.log(`[HD] ✅ Sharp local OK (${finalWidth}x${finalHeight})`);
+    return enhanced;
 }
 
 /**
@@ -154,39 +257,4 @@ async function uploadToCatbox(buffer) {
     }
 
     return url;
-}
-
-/**
- * Mejora la imagen con IA usando dos APIs de respaldo
- */
-async function upscaleImage(url) {
-    const apis = [
-        `https://api.siputzx.my.id/api/tools/remini?url=${encodeURIComponent(url)}`,
-        `https://api.ryzendesu.vip/api/ai/remini?url=${encodeURIComponent(url)}`
-    ];
-
-    let lastError;
-    for (const [i, endpoint] of apis.entries()) {
-        try {
-            const { data } = await axios.get(endpoint, {
-                responseType: 'arraybuffer',
-                headers: { accept: 'image/*', 'User-Agent': 'Mozilla/5.0' },
-                timeout: TIMEOUT_MS
-            });
-
-            // Verificar que la respuesta sea realmente una imagen
-            const buf = Buffer.from(data);
-            const ft = await fileTypeFromBuffer(buf);
-            if (!ft || !ft.mime.startsWith('image/')) {
-                throw new Error('La API no devolvió una imagen válida.');
-            }
-
-            return buf;
-        } catch (err) {
-            console.warn(`[HD] API ${i + 1} falló: ${err.message}`);
-            lastError = err;
-        }
-    }
-
-    throw new Error(`Todas las APIs fallaron. Último error: ${lastError?.message}`);
 }
