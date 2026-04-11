@@ -30,11 +30,12 @@ module.exports = {
             });
         }
 
-        // Snapshot de archivos ANTES de descargar
-        const archivosAntes = new Set(fs.readdirSync(outDir));
-
+        // Nombre único para saber exactamente qué archivo buscar
+        const uniqueId = `ig_${Date.now()}`;
         const cookieArg = `--cookies "${igCookies}"`;
-        const cmd = `${ytDlpPath} ${cookieArg} --ffmpeg-location "${ffmpegPath}" --no-playlist --no-warnings --geo-bypass -P "${outDir}" -o "%(id)s.%(ext)s" "${urlLimpia}"`;
+
+        // Sin --no-playlist para que funcione correctamente con stories
+        const cmd = `${ytDlpPath} ${cookieArg} --ffmpeg-location "${ffmpegPath}" --no-warnings --geo-bypass -P "${outDir}" -o "${uniqueId}.%(ext)s" "${urlLimpia}"`;
 
         let success = false;
         let finalFile = null;
@@ -43,16 +44,16 @@ module.exports = {
         try {
             const { stdout, stderr } = await execPromise(cmd);
 
-            await new Promise(r => setTimeout(r, 1000));
+            await new Promise(r => setTimeout(r, 1500));
 
             fs.writeFileSync(logPath, JSON.stringify({ urlLimpia, cmd, stdout, stderr }, null, 2));
 
-            // Archivos nuevos = los que no estaban antes
-            const archivosAhora = fs.readdirSync(outDir);
-            const archivosNuevos = archivosAhora.filter(f => !archivosAntes.has(f));
+            // Buscar archivo con el uniqueId en vez de comparar snapshots
+            const archivos = fs.readdirSync(outDir);
+            const encontrado = archivos.find(f => f.startsWith(uniqueId));
 
-            if (archivosNuevos.length > 0) {
-                finalFile = path.join(outDir, archivosNuevos[0]);
+            if (encontrado) {
+                finalFile = path.join(outDir, encontrado);
                 success = true;
             } else {
                 lastError = `yt-dlp no generó archivo nuevo.\nSTDOUT: ${stdout}\nSTDERR: ${stderr}`;
