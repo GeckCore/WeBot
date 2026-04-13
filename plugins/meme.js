@@ -2,11 +2,11 @@ import axios from 'axios';
 
 export default {
     name: 'memes_reddit',
-    // Captura .meme
-    match: (text) => /^\.meme$/i.test(text),
+    // Captura .meme, .shitpost o .m
+    match: (text) => /^\.(meme|shitpost|m)$/i.test(text),
 
     execute: async ({ sock, remitente, msg }) => {
-        // Lista de subreddits de Shitposting, Humor Negro y contenido ácido/funable
+        // Subreddits de Shitposting, Humor Negro, Comunidades Edgy y Basadas en español
         const subs = [
             'SpanishShitposting', 
             'MAAU', 
@@ -17,7 +17,9 @@ export default {
             'shitposting_es',
             'RodSquare',
             'orslokx',
-            'Webos'
+            'Webos',
+            'AradirOff',
+            'DankMemes'
         ];
 
         await sock.sendPresenceUpdate('composing', remitente);
@@ -26,44 +28,52 @@ export default {
         let attempts = 0;
         let res;
 
-        // Sistema de reintentos para evitar el Error 404
-        while (!success && attempts < 5) {
+        // Reintentos automáticos para evitar el 404 de Reddit
+        while (!success && attempts < 7) {
             const randomSub = subs[Math.floor(Math.random() * subs.length)];
             try {
                 res = await axios.get(`https://meme-api.com/gimme/${randomSub}`, { timeout: 5000 });
-                if (res.data && res.data.url) {
-                    success = true;
-                }
+                if (res.data && res.data.url) success = true;
             } catch (err) {
                 attempts++;
-                console.log(`[MEMES] Falló r/${randomSub} (Intento ${attempts}/5): ${err.message}`);
+                console.log(`[SHITPOST] Falló r/${randomSub} (Intento ${attempts}/7)`);
             }
         }
 
-        // Si después de 5 intentos falla, probamos el feed general como último recurso
         if (!success) {
             try {
                 res = await axios.get(`https://meme-api.com/gimme`);
                 success = true;
             } catch (e) {
-                return sock.sendMessage(remitente, { text: '❌ Todas las fuentes de memes "funables" están caídas o bloqueadas por la API ahora mismo.' });
+                return sock.sendMessage(remitente, { text: '❌ El servidor de memes está tan funado que no responde.' });
             }
         }
 
         try {
             const { title, url, author, postLink, nsfw, subreddit } = res.data;
+            const nsfwTag = nsfw ? '🔞 *CONTENIDO TURBIO*' : '✨';
+            
+            const caption = `${nsfwTag} *${title}*\n\n👤 *Autor:* ${author}\n📂 *Sub:* r/${subreddit}\n🔗 ${postLink}`;
 
-            // En este modo no bloqueamos nada, solo avisamos si es turbio
-            const nsfwTag = nsfw ? '🔞 *HUMOR TURBIO*' : '✨';
+            // DETECCIÓN DE VIDEO: Si la URL termina en .mp4 o es de ciertos hosts, enviamos como video
+            const isVideo = url.includes('.mp4') || url.includes('v.redd.it') || url.includes('.gif');
 
-            await sock.sendMessage(remitente, { 
-                image: { url: url }, 
-                caption: `${nsfwTag} *${title}*\n\n👤 *Autor:* ${author}\n📂 *Sub:* r/${subreddit}\n🔗 ${postLink}` 
-            }, { quoted: msg });
+            if (isVideo) {
+                await sock.sendMessage(remitente, { 
+                    video: { url: url }, 
+                    caption: caption,
+                    mimetype: 'video/mp4' 
+                }, { quoted: msg });
+            } else {
+                await sock.sendMessage(remitente, { 
+                    image: { url: url }, 
+                    caption: caption 
+                }, { quoted: msg });
+            }
 
         } catch (e) {
-            console.error('Error enviando el meme:', e.message);
-            await sock.sendMessage(remitente, { text: '❌ Error al procesar la imagen del meme.' });
+            console.error('Error enviando shitpost:', e.message);
+            await sock.sendMessage(remitente, { text: '❌ Falló el envío. Probablemente el archivo es demasiado pesado para la VPS.' });
         }
     }
 };
