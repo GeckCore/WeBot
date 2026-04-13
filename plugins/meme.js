@@ -6,7 +6,7 @@ export default {
     match: (text) => /^\.meme$/i.test(text),
 
     execute: async ({ sock, remitente, msg }) => {
-        // Lista de subreddits de Shitposting, Humor Negro y comunidad "funable" en español
+        // Lista de subreddits de Shitposting, Humor Negro y contenido ácido/funable
         const subs = [
             'SpanishShitposting', 
             'MAAU', 
@@ -15,28 +15,46 @@ export default {
             'HumorNegro',
             'squareposting',
             'shitposting_es',
-            'RodSquare'
+            'RodSquare',
+            'orslokx',
+            'Webos'
         ];
-        const randomSub = subs[Math.floor(Math.random() * subs.length)];
+
+        await sock.sendPresenceUpdate('composing', remitente);
+
+        let success = false;
+        let attempts = 0;
+        let res;
+
+        // Sistema de reintentos para evitar el Error 404
+        while (!success && attempts < 5) {
+            const randomSub = subs[Math.floor(Math.random() * subs.length)];
+            try {
+                res = await axios.get(`https://meme-api.com/gimme/${randomSub}`, { timeout: 5000 });
+                if (res.data && res.data.url) {
+                    success = true;
+                }
+            } catch (err) {
+                attempts++;
+                console.log(`[MEMES] Falló r/${randomSub} (Intento ${attempts}/5): ${err.message}`);
+            }
+        }
+
+        // Si después de 5 intentos falla, probamos el feed general como último recurso
+        if (!success) {
+            try {
+                res = await axios.get(`https://meme-api.com/gimme`);
+                success = true;
+            } catch (e) {
+                return sock.sendMessage(remitente, { text: '❌ Todas las fuentes de memes "funables" están caídas o bloqueadas por la API ahora mismo.' });
+            }
+        }
 
         try {
-            await sock.sendPresenceUpdate('composing', remitente);
-
-            // Intentamos obtener del sub aleatorio
-            let res;
-            try {
-                // Quitamos filtros restrictivos para que pase contenido más "edgy"
-                res = await axios.get(`https://meme-api.com/gimme/${randomSub}`);
-            } catch (err) {
-                // Fallback si el sub específico falla
-                res = await axios.get(`https://meme-api.com/gimme/SpanishShitposting`);
-            }
-
             const { title, url, author, postLink, nsfw, subreddit } = res.data;
 
-            // Mantenemos una mención si es NSFW por si quieres saberlo, 
-            // pero lo enviamos igualmente ya que es para uso personal.
-            const nsfwTag = nsfw ? '🔞 *CONTENIDO EDGY/NSFW*' : '✨';
+            // En este modo no bloqueamos nada, solo avisamos si es turbio
+            const nsfwTag = nsfw ? '🔞 *HUMOR TURBIO*' : '✨';
 
             await sock.sendMessage(remitente, { 
                 image: { url: url }, 
@@ -44,8 +62,8 @@ export default {
             }, { quoted: msg });
 
         } catch (e) {
-            console.error('Error en Memes:', e.message);
-            await sock.sendMessage(remitente, { text: '❌ El servidor de memes está caído o el sub es demasiado turbio para la API.' });
+            console.error('Error enviando el meme:', e.message);
+            await sock.sendMessage(remitente, { text: '❌ Error al procesar la imagen del meme.' });
         }
     }
 };
