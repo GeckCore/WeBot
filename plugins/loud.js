@@ -15,7 +15,7 @@ export default {
     execute: async ({ sock, remitente, msg, quoted, downloadContentFromMessage }) => {
         const q = quoted || msg.message;
         
-        // 1. Detección dinámica y estricta de formato (Soporte para MP3 como documento)
+        // 1. Detección dinámica de multimedia (Soporte para MP3 como documento)
         let mediaType = null;
         let mediaMsg = null;
 
@@ -26,14 +26,10 @@ export default {
             mediaMsg = q.videoMessage; 
             mediaType = 'video'; 
         } else if (q?.documentMessage && q.documentMessage.mimetype?.includes('audio')) { 
-            // Soporte para canciones enviadas como archivo (.mp3)
             mediaMsg = q.documentMessage; 
             mediaType = 'document'; 
-        } else if (q?.viewOnceMessage?.message?.audioMessage) { 
-            mediaMsg = q.viewOnceMessage.message.audioMessage; 
-            mediaType = 'audio'; 
-        } else if (q?.viewOnceMessageV2?.message?.audioMessage) { 
-            mediaMsg = q.viewOnceMessageV2.message.audioMessage; 
+        } else if (q?.viewOnceMessage?.message?.audioMessage || q?.viewOnceMessageV2?.message?.audioMessage) { 
+            mediaMsg = q.viewOnceMessage?.message?.audioMessage || q.viewOnceMessageV2?.message?.audioMessage;
             mediaType = 'audio'; 
         }
 
@@ -47,33 +43,33 @@ export default {
         const ffmpegPath = path.join(__dirname, '../ffmpeg');
 
         try {
-            await sock.sendMessage(remitente, { text: '😤 *FORZANDO HARD CLIPPING...* ⚠️' }, { quoted: msg });
+            await sock.sendMessage(remitente, { text: '😤 *REVENTANDO AUDIO...* (Si es una canción, espera unos segundos)' }, { quoted: msg });
 
-            // 2. Descarga usando el mediaType correcto (evita que se corrompa el buffer)
+            // 2. Descarga del contenido
             const stream = await downloadContentFromMessage(mediaMsg, mediaType);
             let buffers = [];
             for await (const chunk of stream) buffers.push(chunk);
             const buffer = Buffer.concat(buffers);
             
-            if (buffer.length === 0) throw new Error("Archivo vacío o corrupto en la descarga.");
+            if (buffer.length === 0) throw new Error("Archivo vacío.");
             fs.writeFileSync(tempIn, buffer);
 
-            // NUEVO MÉTODO: SATURACIÓN SEGURA PARA MÓVILES
-            // 1. treble=g=15 & bass=g=15: Potencian extremos para retener inteligibilidad de voz.
-            // 2. volume=20dB: Ganancia alta (satura pero sin borrar la pista vocal entera).
-            // 3. aformat=sample_fmts=s16: Hace el "corte" de la onda para el efecto shitpost.
-            // 4. volume=0.6: CRÍTICO. Reduce el volumen final a un nivel seguro (60%) para que los 
-            //    sistemas de protección de altavoces en móviles (Android/iOS) no bloqueen el audio.
-            const filters = "treble=g=15,bass=g=15,volume=20dB,aformat=sample_fmts=s16,volume=0.6";
+            // NUEVA TÉCNICA: SHITPOST DISTORTION (Mobile Safe)
+            // - volume=35dB: Ganancia masiva para forzar el recorte de onda (saturación).
+            // - bass=g=20 & treble=g=15: Potencia los graves y mantiene los agudos para que se entienda la letra.
+            // - alimiter=limit=0.8: El secreto. Mantiene el audio "roto" pero bajo el umbral que bloquea el móvil.
+            const filters = "volume=35dB,bass=g=20,treble=g=15,alimiter=limit=0.8:attack=5:release=20";
             
             const cmd = `"${ffmpegPath}" -i "${tempIn}" -af "${filters}" -c:a libopus -b:a 32k -vbr on "${tempOut}"`;
             
-            await execPromise(cmd, { timeout: 120000, maxBuffer: 1024 * 1024 * 50 });
+            // Timeout de 5 minutos y buffer de 100MB para canciones pesadas
+            await execPromise(cmd, { timeout: 300000, maxBuffer: 1024 * 1024 * 100 });
 
             if (!fs.existsSync(tempOut) || fs.statSync(tempOut).size < 100) {
                 throw new Error("El procesamiento falló en FFmpeg.");
             }
 
+            // 3. Enviar resultado como PTT (Nota de voz)
             await sock.sendMessage(remitente, { 
                 audio: { url: tempOut }, 
                 mimetype: 'audio/ogg; codecs=opus', 
@@ -83,13 +79,14 @@ export default {
         } catch (e) {
             console.error('[SATURAR ERROR]:', e);
             let msgError = "❌ Error al procesar.";
-            if (e.message.includes('timeout')) msgError = "❌ La canción es demasiado pesada para procesarla en la VPS.";
+            if (e.message.includes('timeout')) msgError = "❌ La canción es demasiado larga para la CPU de la VPS.";
             await sock.sendMessage(remitente, { text: msgError });
         } finally {
+            // Limpieza diferida
             setTimeout(() => {
-                if (fs.existsSync(tempIn)) fs.unlinkSync(tempIn);
-                if (fs.existsSync(tempOut)) fs.unlinkSync(tempOut);
-            }, 5000);
+                if (fs.existsSync(tempIn)) try { fs.unlinkSync(tempIn); } catch (e) {}
+                if (fs.existsSync(tempOut)) try { fs.unlinkSync(tempOut); } catch (e) {}
+            }, 10000);
         }
     }
 };
