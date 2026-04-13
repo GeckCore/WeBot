@@ -15,7 +15,8 @@ export default {
         const command = args[0].toLowerCase().replace('.', '');
         const textParams = args.slice(1).join(' ');
 
-        const userJid = msg.sender || remitente;
+        // FIX CRÍTICO: Obtener el número real del usuario, no el ID del grupo.
+        const userJid = msg.key?.participant || remitente;
         const userNumber = userJid.split('@')[0];
         const sessionPath = path.join(process.cwd(), 'jadibts', userNumber);
 
@@ -79,6 +80,11 @@ export default {
                 return sock.sendMessage(remitente, { text: '⚠️ Ya tienes una sesión activa conectada a esta VPS.' }, { quoted: msg });
             }
 
+            // Limpieza previa: Si la carpeta existe pero no tiene credenciales, está corrupta. La borramos.
+            if (fs.existsSync(sessionPath) && !fs.existsSync(path.join(sessionPath, 'creds.json'))) {
+                fs.rmSync(sessionPath, { recursive: true, force: true });
+            }
+
             if (!fs.existsSync(sessionPath)) {
                 fs.mkdirSync(sessionPath, { recursive: true });
             }
@@ -93,12 +99,10 @@ export default {
                     version,
                     auth: {
                         creds: state.creds,
-                        // FIX CRÍTICO: Caché de llaves para evitar que el código falle por timeout criptográfico
                         keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'silent' }))
                     },
                     logger: pino({ level: 'silent' }),
                     printQRInTerminal: false,
-                    // FIX CRÍTICO: Debe ser idéntico al bot principal para evitar rechazo de Meta
                     browser: ['Ubuntu', 'Chrome', '122.0.0.0'], 
                     syncFullHistory: false,
                     markOnlineOnConnect: true,
@@ -111,7 +115,6 @@ export default {
 
                 // --- GENERACIÓN DEL PAIRING CODE ---
                 if (!subSock.authState.creds.registered) {
-                    // Esperar 4 segundos (aumentado) para asegurar que el socket está 100% abierto antes de pedir el código
                     setTimeout(async () => {
                         try {
                             const cleanNumber = userNumber.replace(/[^0-9]/g, '');
@@ -124,7 +127,6 @@ export default {
                         } catch (e) {
                             console.error("Error generando pairing code:", e);
                             sock.sendMessage(remitente, { text: '❌ Error técnico al solicitar el código a Meta. Si has intentado mucho, espera 1 hora por el límite de WhatsApp.' });
-                            // Borrar sesión corrupta para evitar bucles
                             try { fs.rmSync(sessionPath, { recursive: true, force: true }); } catch (err) {}
                         }
                     }, 4000);
@@ -150,14 +152,14 @@ export default {
                     if (connection === 'close') {
                         const code = lastDisconnect?.error?.output?.statusCode;
                         const reason = lastDisconnect?.error?.output?.payload?.message || 'Desconocida';
-                        const isLogout = code === 401; // 401 = Sesión cerrada desde el móvil
+                        const isLogout = code === 401; // 401 = Sesión cerrada desde el móvil / Error de llaves
 
                         console.log(`[SUB-BOT] Conexión cerrada para ${userNumber}. Razón: ${reason} (${code})`);
 
                         const index = global.conns.indexOf(subSock);
                         if (index > -1) global.conns.splice(index, 1);
 
-                        if (!isLogout && code !== 405) { // 405 a veces ocurre si Meta rechaza el código
+                        if (!isLogout && code !== 405) { 
                             console.log(`[SUB-BOT] Reintentando conexión para ${userNumber} en 5 segundos...`);
                             setTimeout(() => startSubBot(), 5000);
                         } else {
@@ -170,7 +172,7 @@ export default {
                 });
 
                 subSock.ev.on('messages.upsert', async (m) => {
-                    // Delegación de comandos futuros
+                    // Delegación de comandos futuros para sub-bots
                 });
             }
 
