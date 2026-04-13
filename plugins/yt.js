@@ -21,12 +21,18 @@ export default {
                 await sock.sendPresenceUpdate('recording', remitente);
                 let data = await fg.yta(url);
                 let title = data.title || "YouTube Audio";
+
+                // FIX CRÍTICO MÓVILES: Descargar el buffer a la memoria RAM primero
+                // Evita que Baileys fragmente el archivo y rompa los metadatos en Android/iOS
+                const response = await fetch(data.dl_url);
+                const arrayBuffer = await response.arrayBuffer();
+                const buffer = Buffer.from(arrayBuffer);
                 
                 await sock.sendMessage(remitente, {
-                    audio: { url: data.dl_url },
-                    mimetype: 'audio/mp4',
-                    fileName: `${title}.m4a`,
-                    ptt: false // Para enviarlo como canción/archivo y no como nota de voz
+                    audio: buffer,
+                    mimetype: 'audio/mpeg',
+                    fileName: `${title}.mp3`,
+                    ptt: false // ptt: false = Audio normal (canción), ptt: true = Nota de voz
                 }, { quoted: msg });
 
             } else if (command === 'ytmp4') {
