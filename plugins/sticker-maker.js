@@ -1,13 +1,14 @@
-const { exec } = require('child_process');
-const fs = require('fs');
-const path = require('path');
-const util = require('util');
+import { exec } from 'child_process';
+import fs from 'fs';
+import path from 'path';
+import util from 'util';
+
 const execPromise = util.promisify(exec);
 
 export default {
     name: 'stickers',
     // Captura .s, .sticker y .toimg (para el proceso inverso)
-    match: (text) => /^\.(maker)$/i.test(text),
+    match: (text) => /^\.(s|sticker|toimg)$/i.test(text),
 
     execute: async ({ sock, remitente, msg, textoLimpio, quoted, downloadContentFromMessage, getMediaInfo }) => {
         const command = textoLimpio.toLowerCase().split(' ')[0];
