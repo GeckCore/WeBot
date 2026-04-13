@@ -25,7 +25,7 @@ export default {
         const ffmpegPath = path.join(process.cwd(), 'ffmpeg');
 
         try {
-            await sock.sendMessage(remitente, { text: '🎚️ *Saturando audio...* ⚠️' }, { quoted: msg });
+            await sock.sendMessage(remitente, { text: '😤 *REVENTANDO EL AUDIO...* ⚠️' }, { quoted: msg });
 
             // 2. Descargar
             const mediaType = q.audioMessage ? 'audio' : 'video';
@@ -36,12 +36,14 @@ export default {
             if (buffer.length === 0) throw new Error("Archivo vacío.");
             fs.writeFileSync(tempIn, buffer);
 
-            // 3. FFMPEG: Filtros de saturación agresiva
-            // bass=g=20: Retumba los bajos
-            // treble=g=15: Satura los agudos para que la voz sea "entendible" entre el caos
-            // volume=25dB: Fuerza la saturación digital
-            // alimiter: Evita que el archivo se corrompa para que WhatsApp no lo bloquee
-            const filters = "bass=g=20,treble=g=15,volume=25dB,alimiter=level_in=1:level_out=1:limit=0.8:attack=5:release=50";
+            // 3. FFMPEG: Filtros de saturación EXTREMA
+            // bass=g=30: Hace que el audio retumbe físicamente.
+            // treble=g=20: Realza los agudos para que la voz no se pierda en el ruido.
+            // acrusher: Añade distorsión digital (bitcrush) para ese sonido "roto".
+            // volume=40dB: Ganancia masiva para forzar el clipping (saturación).
+            // Quitamos el alimiter para permitir que la onda se cuadre (distorsión real).
+            const filters = "bass=g=30,treble=g=20,acrusher=level_in=1:level_out=1:bits=8:mode=log:aa=1,volume=40dB";
+            
             const cmd = `"${ffmpegPath}" -i "${tempIn}" -af "${filters}" -c:a libopus -b:a 32k -vbr on "${tempOut}"`;
             
             await execPromise(cmd, { timeout: 45000 });
