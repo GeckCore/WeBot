@@ -23,11 +23,10 @@ export default {
         const timestamp = Date.now();
         const tempIn = path.join(__dirname, `../temp_in_${timestamp}`);
         const tempOut = path.join(__dirname, `../temp_out_${timestamp}.ogg`);
-        // Ruta corregida según tu estructura: ../ffmpeg relativo al plugin
         const ffmpegPath = path.join(__dirname, '../ffmpeg');
 
         try {
-            await sock.sendMessage(remitente, { text: '😤 *REVENTANDO AUDIO...* ⚠️' }, { quoted: msg });
+            await sock.sendMessage(remitente, { text: '😤 *FORZANDO HARD CLIPPING...* ⚠️' }, { quoted: msg });
 
             const mediaType = q.audioMessage ? 'audio' : 'video';
             const stream = await downloadContentFromMessage(audioMsg, mediaType);
@@ -38,17 +37,15 @@ export default {
             if (buffer.length === 0) throw new Error("Archivo vacío.");
             fs.writeFileSync(tempIn, buffer);
 
-            // FILTROS DE SATURACIÓN "ENTENDIBLE":
-            // volume=30dB: Ganancia forzada para clipping digital.
-            // bass=g=20: Potencia los bajos significativamente.
-            // treble=g=15: Realza la voz para que no se pierda entre la saturación.
-            // alimiter: Evita que el archivo se corrompa pero mantiene el sonido "cuadrado".
-            const filters = "volume=30dB,bass=g=20,treble=g=15,alimiter=limit=0.9";
+            // NUEVO MÉTODO: HARD CLIPPING MATEMÁTICO
+            // 1. treble=g=15: Sube los agudos para proteger la inteligibilidad de la voz.
+            // 2. bass=g=15: Sube los graves para el golpe.
+            // 3. volume=40dB: Sube el volumen de forma absurda (rompe el límite).
+            // 4. aformat=sample_fmts=s16: Obliga a FFmpeg a cortar de tajo todo lo que exceda el volumen máximo, creando distorsión cuadrada pura.
+            const filters = "treble=g=15,bass=g=15,volume=40dB,aformat=sample_fmts=s16";
             
-            // Bitrate de 32k para ligereza en la VPS y velocidad de proceso
             const cmd = `"${ffmpegPath}" -i "${tempIn}" -af "${filters}" -c:a libopus -b:a 32k -vbr on "${tempOut}"`;
             
-            // Límites amplios para canciones largas
             await execPromise(cmd, { timeout: 120000, maxBuffer: 1024 * 1024 * 50 });
 
             if (!fs.existsSync(tempOut) || fs.statSync(tempOut).size < 100) {
@@ -67,7 +64,6 @@ export default {
             if (e.message.includes('timeout')) msgError = "❌ Audio demasiado pesado para la VPS.";
             await sock.sendMessage(remitente, { text: msgError });
         } finally {
-            // Limpieza diferida para asegurar que el archivo se envió
             setTimeout(() => {
                 if (fs.existsSync(tempIn)) fs.unlinkSync(tempIn);
                 if (fs.existsSync(tempOut)) fs.unlinkSync(tempOut);
