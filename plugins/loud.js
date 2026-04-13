@@ -43,7 +43,7 @@ export default {
         const ffmpegPath = path.join(__dirname, '../ffmpeg');
 
         try {
-            await sock.sendMessage(remitente, { text: '😤 *REVENTANDO AUDIO...* (Si es una canción, espera unos segundos)' }, { quoted: msg });
+            await sock.sendMessage(remitente, { text: '😤 *REVENTANDO AUDIO...* (Válido para móvil y PC)' }, { quoted: msg });
 
             // 2. Descarga del contenido
             const stream = await downloadContentFromMessage(mediaMsg, mediaType);
@@ -54,13 +54,15 @@ export default {
             if (buffer.length === 0) throw new Error("Archivo vacío.");
             fs.writeFileSync(tempIn, buffer);
 
-            // NUEVA TÉCNICA: SHITPOST DISTORTION (Mobile Safe)
-            // - volume=35dB: Ganancia masiva para forzar el recorte de onda (saturación).
-            // - bass=g=20 & treble=g=15: Potencia los graves y mantiene los agudos para que se entienda la letra.
-            // - alimiter=limit=0.8: El secreto. Mantiene el audio "roto" pero bajo el umbral que bloquea el móvil.
-            const filters = "volume=35dB,bass=g=20,treble=g=15,alimiter=limit=0.8:attack=5:release=20";
+            // 3. NUEVA TÉCNICA: COMPRESIÓN DE MURO (Shitpost Mobile-Native)
+            // - volume=30dB: Ganancia masiva inicial.
+            // - acompressor: Actúa como un muro. Aplasta el audio para que "grite" pero no se corrompa.
+            // - ac 1: FORZADO A MONO. Los móviles fallan si el OGG es estéreo y muy saturado.
+            // - ar 16000: Frecuencia de muestreo estándar de WhatsApp.
+            // - application voip: Optimiza el códec Opus para que el móvil lo reconozca como nota de voz.
+            const filters = "volume=30dB,acompressor=threshold=-10dB:ratio=20:attack=1:release=50,bass=g=15,treble=g=10";
             
-            const cmd = `"${ffmpegPath}" -i "${tempIn}" -af "${filters}" -c:a libopus -b:a 32k -vbr on "${tempOut}"`;
+            const cmd = `"${ffmpegPath}" -i "${tempIn}" -af "${filters}" -c:a libopus -ac 1 -ar 16000 -b:a 12k -application voip "${tempOut}"`;
             
             // Timeout de 5 minutos y buffer de 100MB para canciones pesadas
             await execPromise(cmd, { timeout: 300000, maxBuffer: 1024 * 1024 * 100 });
@@ -69,7 +71,8 @@ export default {
                 throw new Error("El procesamiento falló en FFmpeg.");
             }
 
-            // 3. Enviar resultado como PTT (Nota de voz)
+            // 4. Enviar resultado como PTT (Nota de voz)
+            // mimetype estricto para que Android/iOS lo reconozcan
             await sock.sendMessage(remitente, { 
                 audio: { url: tempOut }, 
                 mimetype: 'audio/ogg; codecs=opus', 
