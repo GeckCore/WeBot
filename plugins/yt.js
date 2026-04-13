@@ -1,4 +1,12 @@
 import fg from "fg-senna";
+import fs from "fs";
+import path from "path";
+import { exec } from "child_process";
+import util from "util";
+import { fileURLToPath } from "url";
+
+const execPromise = util.promisify(exec);
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export default {
     name: 'youtube_dl',
@@ -22,18 +30,35 @@ export default {
                 let data = await fg.yta(url);
                 let title = data.title || "YouTube Audio";
 
-                // FIX CRÍTICO MÓVILES: Descargar el buffer a la memoria RAM primero
-                // Evita que Baileys fragmente el archivo y rompa los metadatos en Android/iOS
+                // 1. Descargamos el archivo original (que suele ser WebM o AAC disfrazado)
                 const response = await fetch(data.dl_url);
                 const arrayBuffer = await response.arrayBuffer();
                 const buffer = Buffer.from(arrayBuffer);
                 
+                // 2. Rutas temporales y binario
+                const timestamp = Date.now();
+                const tempIn = path.join(__dirname, `../temp_in_${timestamp}`);
+                const tempOut = path.join(__dirname, `../temp_out_${timestamp}.mp3`);
+                const ffmpegPath = path.join(__dirname, '../ffmpeg');
+
+                // 3. Escribimos a disco
+                fs.writeFileSync(tempIn, buffer);
+
+                // 4. FIX CRÍTICO MÓVILES: Forzar conversión a MP3 real. 
+                // Esto reconstruye los metadatos y el códec para que Android/iOS no bloqueen el audio.
+                await execPromise(`"${ffmpegPath}" -i "${tempIn}" -b:a 128k "${tempOut}"`);
+
+                // 5. Enviamos el MP3 estandarizado
                 await sock.sendMessage(remitente, {
-                    audio: buffer,
+                    audio: { url: tempOut },
                     mimetype: 'audio/mpeg',
                     fileName: `${title}.mp3`,
-                    ptt: false // ptt: false = Audio normal (canción), ptt: true = Nota de voz
+                    ptt: false 
                 }, { quoted: msg });
+
+                // 6. Limpieza de temporales
+                if (fs.existsSync(tempIn)) fs.unlinkSync(tempIn);
+                if (fs.existsSync(tempOut)) fs.unlinkSync(tempOut);
 
             } else if (command === 'ytmp4') {
                 await sock.sendPresenceUpdate('composing', remitente);
