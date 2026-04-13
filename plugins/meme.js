@@ -6,15 +6,16 @@ export default {
     match: (text) => /^\.meme$/i.test(text),
 
     execute: async ({ sock, remitente, msg }) => {
-        // Lista ampliada de subreddits para evitar 404 (mezcla español/inglés)
+        // Lista de subreddits de Shitposting, Humor Negro y comunidad "funable" en español
         const subs = [
-            'SpanishMemes', 
-            'memexico', 
-            'memes', 
-            'dankmemes', 
-            'wholesomememes', 
-            'LatinoPeopleTwitter',
-            'terriblefacebookmemes'
+            'SpanishShitposting', 
+            'MAAU', 
+            'BeelceReborn', 
+            'Dankmemesespanol', 
+            'HumorNegro',
+            'squareposting',
+            'shitposting_es',
+            'RodSquare'
         ];
         const randomSub = subs[Math.floor(Math.random() * subs.length)];
 
@@ -24,28 +25,27 @@ export default {
             // Intentamos obtener del sub aleatorio
             let res;
             try {
+                // Quitamos filtros restrictivos para que pase contenido más "edgy"
                 res = await axios.get(`https://meme-api.com/gimme/${randomSub}`);
             } catch (err) {
-                // Fallback: Si el sub falla (404), pedimos un meme aleatorio general
-                console.log(`[MEMES] Falló r/${randomSub}, cargando general...`);
-                res = await axios.get(`https://meme-api.com/gimme`);
+                // Fallback si el sub específico falla
+                res = await axios.get(`https://meme-api.com/gimme/SpanishShitposting`);
             }
 
             const { title, url, author, postLink, nsfw, subreddit } = res.data;
 
-            // Filtro de seguridad
-            if (nsfw) {
-                return sock.sendMessage(remitente, { text: '🔞 El meme seleccionado era NSFW y ha sido omitido por seguridad.' });
-            }
+            // Mantenemos una mención si es NSFW por si quieres saberlo, 
+            // pero lo enviamos igualmente ya que es para uso personal.
+            const nsfwTag = nsfw ? '🔞 *CONTENIDO EDGY/NSFW*' : '✨';
 
             await sock.sendMessage(remitente, { 
                 image: { url: url }, 
-                caption: `✨ *${title}*\n\n👤 *Autor:* ${author}\n📂 *Sub:* r/${subreddit}\n🔗 ${postLink}` 
+                caption: `${nsfwTag} *${title}*\n\n👤 *Autor:* ${author}\n📂 *Sub:* r/${subreddit}\n🔗 ${postLink}` 
             }, { quoted: msg });
 
         } catch (e) {
-            console.error('Error final en Memes:', e.message);
-            await sock.sendMessage(remitente, { text: '❌ No hay conexión con el servidor de memes. Intenta de nuevo más tarde.' });
+            console.error('Error en Memes:', e.message);
+            await sock.sendMessage(remitente, { text: '❌ El servidor de memes está caído o el sub es demasiado turbio para la API.' });
         }
     }
 };
