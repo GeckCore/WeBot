@@ -6,47 +6,51 @@ import util from 'util';
 const execPromise = util.promisify(exec);
 
 export default {
-    name: 'bass_boost',
-    match: (text) => /^\.(bass|earrape)$/i.test(text),
+    name: 'audio_saturado',
+    // Captura .saturar, .saturado o .loud
+    match: (text) => /^\.(saturar|saturado|loud)$/i.test(text),
 
     execute: async ({ sock, remitente, msg, quoted, downloadContentFromMessage }) => {
-        // 1. Validar que se está respondiendo a un contenido de audio o video
+        // 1. Validar contenido multimedia
         const q = quoted || msg.message;
         const audioMsg = q?.audioMessage || q?.videoMessage || q?.viewOnceMessage?.message?.audioMessage || q?.viewOnceMessageV2?.message?.audioMessage;
 
         if (!audioMsg) {
-            return sock.sendMessage(remitente, { text: '⚠️ Responde a una nota de voz, audio o video para reventarle los bajos.' }, { quoted: msg });
+            return sock.sendMessage(remitente, { text: '⚠️ Responde a un audio o video para saturarlo al límite.' }, { quoted: msg });
         }
 
-        // 2. Definir rutas (usando el directorio raíz donde están los binarios)
         const timestamp = Date.now();
         const tempIn = path.join(process.cwd(), `temp_in_${timestamp}`);
         const tempOut = path.join(process.cwd(), `temp_out_${timestamp}.ogg`);
         const ffmpegPath = path.join(process.cwd(), 'ffmpeg');
 
         try {
-            await sock.sendMessage(remitente, { text: '🔊 *Procesando Earrape...* 💥' }, { quoted: msg });
+            await sock.sendMessage(remitente, { text: '🎚️ *Saturando audio...* ⚠️' }, { quoted: msg });
 
-            // 3. Descargar el archivo
+            // 2. Descargar
             const mediaType = q.audioMessage ? 'audio' : 'video';
             const stream = await downloadContentFromMessage(audioMsg, mediaType);
             let buffer = Buffer.from([]);
             for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
             
-            if (buffer.length === 0) throw new Error("No se pudo descargar el audio.");
+            if (buffer.length === 0) throw new Error("Archivo vacío.");
             fs.writeFileSync(tempIn, buffer);
 
-            // 4. Ejecutar FFMPEG con filtros de distorsión y salida OPUS (Formato nativo de WA)
-            // g=15 en bass es suficiente para que retumbe sin corromper el archivo.
-            const cmd = `"${ffmpegPath}" -i "${tempIn}" -af "bass=g=15,volume=2.5" -c:a libopus -b:a 32k -vbr on "${tempOut}"`;
+            // 3. FFMPEG: Filtros de saturación agresiva
+            // bass=g=20: Retumba los bajos
+            // treble=g=15: Satura los agudos para que la voz sea "entendible" entre el caos
+            // volume=25dB: Fuerza la saturación digital
+            // alimiter: Evita que el archivo se corrompa para que WhatsApp no lo bloquee
+            const filters = "bass=g=20,treble=g=15,volume=25dB,alimiter=level_in=1:level_out=1:limit=0.8:attack=5:release=50";
+            const cmd = `"${ffmpegPath}" -i "${tempIn}" -af "${filters}" -c:a libopus -b:a 32k -vbr on "${tempOut}"`;
             
-            await execPromise(cmd, { timeout: 30000 }); // 30s timeout
+            await execPromise(cmd, { timeout: 45000 });
 
             if (!fs.existsSync(tempOut) || fs.statSync(tempOut).size < 100) {
-                throw new Error("El procesamiento de audio falló.");
+                throw new Error("Fallo en la generación del archivo saturado.");
             }
 
-            // 5. Enviar como nota de voz (ptt: true) para que sea instantáneo
+            // 4. Enviar como nota de voz
             await sock.sendMessage(remitente, { 
                 audio: { url: tempOut }, 
                 mimetype: 'audio/ogg; codecs=opus', 
@@ -54,10 +58,9 @@ export default {
             }, { quoted: msg });
 
         } catch (e) {
-            console.error('[BASS ERROR]:', e);
-            await sock.sendMessage(remitente, { text: `❌ Error: ${e.message.includes('timeout') ? 'El audio es demasiado largo.' : 'No se pudo procesar el audio.'}` });
+            console.error('[SATURAR ERROR]:', e);
+            await sock.sendMessage(remitente, { text: `❌ Error: ${e.message.includes('timeout') ? 'Audio demasiado largo.' : 'No se pudo saturar el archivo.'}` });
         } finally {
-            // Limpieza de archivos temporales
             if (fs.existsSync(tempIn)) fs.unlinkSync(tempIn);
             if (fs.existsSync(tempOut)) fs.unlinkSync(tempOut);
         }
