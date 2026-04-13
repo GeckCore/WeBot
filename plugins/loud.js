@@ -58,12 +58,13 @@ export default {
             if (buffer.length === 0) throw new Error("Archivo vacío o corrupto en la descarga.");
             fs.writeFileSync(tempIn, buffer);
 
-            // NUEVO MÉTODO: HARD CLIPPING MATEMÁTICO
-            // 1. treble=g=15: Sube los agudos para proteger la inteligibilidad de la voz.
-            // 2. bass=g=15: Sube los graves para el golpe.
-            // 3. volume=40dB: Sube el volumen de forma absurda (rompe el límite).
-            // 4. aformat=sample_fmts=s16: Obliga a FFmpeg a cortar de tajo todo lo que exceda el volumen máximo, creando distorsión cuadrada pura.
-            const filters = "treble=g=15,bass=g=15,volume=40dB,aformat=sample_fmts=s16";
+            // NUEVO MÉTODO: SATURACIÓN SEGURA PARA MÓVILES
+            // 1. treble=g=15 & bass=g=15: Potencian extremos para retener inteligibilidad de voz.
+            // 2. volume=20dB: Ganancia alta (satura pero sin borrar la pista vocal entera).
+            // 3. aformat=sample_fmts=s16: Hace el "corte" de la onda para el efecto shitpost.
+            // 4. volume=0.6: CRÍTICO. Reduce el volumen final a un nivel seguro (60%) para que los 
+            //    sistemas de protección de altavoces en móviles (Android/iOS) no bloqueen el audio.
+            const filters = "treble=g=15,bass=g=15,volume=20dB,aformat=sample_fmts=s16,volume=0.6";
             
             const cmd = `"${ffmpegPath}" -i "${tempIn}" -af "${filters}" -c:a libopus -b:a 32k -vbr on "${tempOut}"`;
             
