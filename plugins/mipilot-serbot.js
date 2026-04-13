@@ -1,4 +1,4 @@
-import { makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion, jidNormalizedUser, Browsers, delay } from '@whiskeysockets/baileys';
+import { makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion, jidNormalizedUser, makeCacheableSignalKeyStore, delay } from '@whiskeysockets/baileys';
 import fs from 'fs';
 import path from 'path';
 import pino from 'pino';
@@ -23,7 +23,6 @@ export default {
         // 1. COMANDO TXBOT (Broadcast a Sub-Bots)
         // ==========================================
         if (command === 'txbot') {
-            // Seguridad: Solo el bot principal (el número que aloja la sesión raíz) puede usar esto
             if (jidNormalizedUser(sock.user.id) !== jidNormalizedUser(userJid)) {
                 return sock.sendMessage(remitente, { text: '❌ Este comando es exclusivo del Bot Principal.' }, { quoted: msg });
             }
@@ -44,7 +43,7 @@ export default {
             const broadcastMsg = `📢 *COMUNICADO DEL BOT PRINCIPAL*\n────────────────────\n\n${textParams}`;
 
             for (const jid of uniqueSubBots) {
-                await delay(1500); // Retraso para evitar baneo por spam
+                await delay(1500); 
                 await sock.sendMessage(jid, { text: broadcastMsg });
             }
 
@@ -75,7 +74,6 @@ export default {
         // 3. COMANDO BOTCLONE / JADIBOT (Pairing Code)
         // ==========================================
         if (['jadibot', 'serbot', 'botclone'].includes(command)) {
-            // Verificar si ya está conectado en esta instancia de memoria
             const existingConn = global.conns.find(c => c.user && (jidNormalizedUser(c.user.id) === jidNormalizedUser(userJid)));
             if (existingConn) {
                 return sock.sendMessage(remitente, { text: '⚠️ Ya tienes una sesión activa conectada a esta VPS.' }, { quoted: msg });
@@ -85,7 +83,7 @@ export default {
                 fs.mkdirSync(sessionPath, { recursive: true });
             }
 
-            await sock.sendMessage(remitente, { text: '⏳ Preparando solicitud de vinculación con los servidores de Meta...' }, { quoted: msg });
+            await sock.sendMessage(remitente, { text: '⏳ Preparando la encriptación y solicitando código a Meta...' }, { quoted: msg });
 
             async function startSubBot() {
                 const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
@@ -93,11 +91,15 @@ export default {
 
                 const subSock = makeWASocket({
                     version,
-                    auth: state,
+                    auth: {
+                        creds: state.creds,
+                        // FIX CRÍTICO: Caché de llaves para evitar que el código falle por timeout criptográfico
+                        keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'silent' }))
+                    },
                     logger: pino({ level: 'silent' }),
                     printQRInTerminal: false,
-                    // Browser debe ser específico para que WhatsApp acepte el Pairing Code sin errores
-                    browser: Browsers.ubuntu('Chrome'), 
+                    // FIX CRÍTICO: Debe ser idéntico al bot principal para evitar rechazo de Meta
+                    browser: ['Ubuntu', 'Chrome', '122.0.0.0'], 
                     syncFullHistory: false,
                     markOnlineOnConnect: true,
                     getMessage: async (key) => {
@@ -109,20 +111,23 @@ export default {
 
                 // --- GENERACIÓN DEL PAIRING CODE ---
                 if (!subSock.authState.creds.registered) {
-                    // Retraso de 3s necesario para que el socket inicie la negociación criptográfica
+                    // Esperar 4 segundos (aumentado) para asegurar que el socket está 100% abierto antes de pedir el código
                     setTimeout(async () => {
                         try {
-                            let codeBot = await subSock.requestPairingCode(userNumber);
+                            const cleanNumber = userNumber.replace(/[^0-9]/g, '');
+                            let codeBot = await subSock.requestPairingCode(cleanNumber);
                             codeBot = codeBot?.match(/.{1,4}/g)?.join("-") || codeBot;
 
-                            const instruction = `➤ *CÓDIGO DE VINCULACIÓN*\n\n*${codeBot}*\n\n1. Abre tu WhatsApp\n2. Toca en el Menú ⋮ o Configuración\n3. Dispositivos vinculados\n4. Vincular con número de teléfono\n5. Introduce este código de 8 letras.\n\n_⚠️ El código expira rápido y solo sirve para tu número._`;
+                            const instruction = `➤ *CÓDIGO DE VINCULACIÓN*\n\n*${codeBot}*\n\n1. Abre tu WhatsApp\n2. Toca en el Menú ⋮ o Configuración\n3. Dispositivos vinculados\n4. Vincular con número de teléfono\n5. Introduce este código de 8 letras.\n\n_⚠️ Tienes 30 segundos antes de que el código expire por seguridad de Meta._`;
 
                             await sock.sendMessage(remitente, { text: instruction }, { quoted: msg });
                         } catch (e) {
                             console.error("Error generando pairing code:", e);
-                            sock.sendMessage(remitente, { text: '❌ Error técnico al solicitar el código a Meta. Inténtalo de nuevo.' });
+                            sock.sendMessage(remitente, { text: '❌ Error técnico al solicitar el código a Meta. Si has intentado mucho, espera 1 hora por el límite de WhatsApp.' });
+                            // Borrar sesión corrupta para evitar bucles
+                            try { fs.rmSync(sessionPath, { recursive: true, force: true }); } catch (err) {}
                         }
-                    }, 3000);
+                    }, 4000);
                 }
 
                 // --- MANEJO DE CONEXIÓN DEL SUB-BOT ---
@@ -152,19 +157,20 @@ export default {
                         const index = global.conns.indexOf(subSock);
                         if (index > -1) global.conns.splice(index, 1);
 
-                        if (!isLogout) {
+                        if (!isLogout && code !== 405) { // 405 a veces ocurre si Meta rechaza el código
                             console.log(`[SUB-BOT] Reintentando conexión para ${userNumber} en 5 segundos...`);
                             setTimeout(() => startSubBot(), 5000);
                         } else {
                             fs.rmSync(sessionPath, { recursive: true, force: true });
-                            await sock.sendMessage(remitente, { text: '❌ Has cerrado la sesión desde tu WhatsApp. Tu Sub-Bot ha sido eliminado de la VPS.' });
+                            if (isLogout) {
+                                await sock.sendMessage(remitente, { text: '❌ Has cerrado la sesión desde tu WhatsApp o el código expiró. Tu Sub-Bot ha sido eliminado de la VPS.' });
+                            }
                         }
                     }
                 });
 
                 subSock.ev.on('messages.upsert', async (m) => {
-                    // Aquí puedes añadir en el futuro la delegación de mensajes para que los sub-bots 
-                    // lean comandos, si es que lo requieres.
+                    // Delegación de comandos futuros
                 });
             }
 
