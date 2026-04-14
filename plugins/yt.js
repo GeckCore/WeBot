@@ -11,7 +11,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export default {
     name: 'youtube_dl',
     // Captura tanto .ytmp3 como .ytmp4
-    match: (text) => /^\.(yta|ytv)\s+/i.test(text),
+    match: (text) => /^\.(ytmp3|ytmp4)\s+/i.test(text),
 
     execute: async ({ sock, remitente, msg, textoLimpio }) => {
         const args = textoLimpio.trim().split(/\s+/);
@@ -25,7 +25,7 @@ export default {
         let statusMsg = await sock.sendMessage(remitente, { text: `⏳ Procesando ${command.toUpperCase()}...` }, { quoted: msg });
 
         try {
-            if (command === 'yta') {
+            if (command === 'ytmp3') {
                 await sock.sendPresenceUpdate('recording', remitente);
                 let data = await fg.yta(url);
                 let title = data.title || "YouTube Audio";
@@ -60,7 +60,7 @@ export default {
                 if (fs.existsSync(tempIn)) fs.unlinkSync(tempIn);
                 if (fs.existsSync(tempOut)) fs.unlinkSync(tempOut);
 
-            } else if (command === 'ytv') {
+            } else if (command === 'ytmp4') {
                 await sock.sendPresenceUpdate('composing', remitente);
                 let data = await fg.ytv(url, "480p");
                 let title = data.title || "YouTube Video";
