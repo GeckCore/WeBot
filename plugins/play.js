@@ -31,7 +31,7 @@ export default {
             const { title, timestamp, views, url, thumbnail } = video;
 
             // Adaptación de los botones de Telegram a texto de WhatsApp
-            const captionText = `🎵 *${title}*\n⏱️ ${timestamp} | 👀 ${views}\n\nPara descargar, copia y usa:\n🎶 *.yta ${url}*\n🎥 *.ytv ${url}*`;
+            const captionText = `🎵 *${title}*\n⏱️ ${timestamp} | 👀 ${views}\n\nPara descargar, copia y usa:\n🎶 *.ytmp3 ${url}*\n🎥 *.ytmp4 ${url}*`;
 
             await sock.sendMessage(remitente, {
                 image: { url: thumbnail },
