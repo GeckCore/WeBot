@@ -7,9 +7,36 @@ import path from 'path';
 // ==========================================
 const dictionary = {
     'mujeres': 'mujeres.webp',
+    'mujere': 'mujeres.webp',
+    'women': 'mujeres.webp',
+    'womens': 'mujeres.webp',
     'mierda': 'mierda.webp',
     'psoe': 'psoe.webp',
-    'jaja': 'jajaja.webp'
+    'jaja': 'jajaja.webp',
+    'jajaja': 'jajaja.webp',
+    'jsjs': 'jajaja.webp',
+    'pipipi': 'pipipi.webp',
+    'ok': 'okey.webp',
+    'vale': 'okey.webp',
+    ':3': '3.webp',
+    'psoe': 'psoe.webp',
+    'mmm': 'ujumm.webp',
+    'ujumm': 'ujumm.webp',
+    'miedo': 'miedo.webp',
+    'voy': 'voy.webp',
+    'vamos': 'voy.webp',
+    'chino': 'chino.webp',
+    'poeta': 'poeta.webp',
+    'poema': 'poeta.webp',
+    'psoe': 'psoe.webp',
+    'nazi': 'nazi.webp',
+    'me la pela': 'melapela.webp',
+    '-1000 aura': 'aura.webp',
+    'fuentes': 'fuentes.webp',
+    'sospechoso': 'desconfianza.webp',
+    'noo': 'noo.webp',
+    'rico': 'rico.webp',
+    'riko': 'rico.webp'
 };
 
 const triggers = Object.keys(dictionary);
