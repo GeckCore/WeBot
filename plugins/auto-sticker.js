@@ -75,7 +75,6 @@ const dictionary = {
 
 const triggers = Object.keys(dictionary);
 
-// Función para escapar caracteres especiales de Regex en las frases (ej: :3 o -1000)
 const escapeRegex = (string) => string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 export default {
@@ -85,7 +84,6 @@ export default {
         if (/^\.(autosticker|as)\s+(on|off)$/i.test(text)) return true;
         
         const lower = text.toLowerCase();
-        // Usa un motor de detección adaptado para detectar frases compuestas y símbolos sin romper la validación
         return triggers.some(word => {
             const regex = new RegExp(`(^|\\s|[.,?!])${escapeRegex(word)}([.,?!\\s]|$)`, 'i');
             return regex.test(lower);
@@ -93,31 +91,30 @@ export default {
     },
 
     execute: async ({ sock, remitente, msg, textoLimpio }) => {
-        if (!global.db.data.chats[remitente]) {
-            global.db.data.chats[remitente] = { autosticker: false };
+        // Inicializar la configuración global si no existe en la base de datos
+        if (global.db.data.settings.autosticker === undefined) {
+            global.db.data.settings.autosticker = false;
         }
         
-        // 1. GESTIÓN DEL COMANDO (ON/OFF)
+        // 1. GESTIÓN DEL COMANDO (ON/OFF) - AHORA ES GLOBAL
         const commandMatch = textoLimpio.match(/^\.(autosticker|as)\s+(on|off)$/i);
         if (commandMatch) {
             const state = commandMatch[2].toLowerCase() === 'on';
-            global.db.data.chats[remitente].autosticker = state;
+            global.db.data.settings.autosticker = state; // Guardado maestro
             
             return sock.sendMessage(remitente, { 
-                text: `✅ *Auto-Stickers:* ${state ? 'ENCENDIDOS' : 'APAGADOS'} en este chat.` 
+                text: `✅ *Auto-Stickers:* ${state ? 'ENCENDIDOS' : 'APAGADOS'} de forma **GLOBAL** para todos los chats.` 
             }, { quoted: msg });
         }
 
-        // 2. DETECCIÓN Y ENVÍO (Solo si está encendido)
-        if (!global.db.data.chats[remitente].autosticker) return;
+        // 2. DETECCIÓN Y ENVÍO (Solo si el maestro está encendido)
+        if (!global.db.data.settings.autosticker) return;
 
         const mediaDir = path.join(process.cwd(), 'media');
         if (!fs.existsSync(mediaDir)) fs.mkdirSync(mediaDir);
 
         const lowerText = textoLimpio.toLowerCase();
 
-        // Ordenamos los triggers por longitud (los más largos primero) para evitar 
-        // que "ok" se detecte antes que "okey" si ambos estuvieran en conflicto.
         const sortedTriggers = [...triggers].sort((a, b) => b.length - a.length);
 
         for (const palabra of sortedTriggers) {
@@ -131,7 +128,6 @@ export default {
                         sticker: { url: stickerPath } 
                     }, { quoted: msg });
                     
-                    // Break inmediato: Solo envía 1 sticker por mensaje
                     break; 
                 } else {
                     console.log(`[AutoSticker] Aviso: Se detectó '${palabra}', pero no existe el archivo ${stickerPath}`);
