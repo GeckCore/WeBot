@@ -87,17 +87,45 @@ export default {
 };
 
 // ==========================================
-// NÚCLEO AUTÓNOMO DEL SUB-BOT
+// NÚCLEO AUTÓNOMO DEL SUB-BOT (VERSIÓN CORREGIDA)
 // ==========================================
 async function startSubBot(mainSock, remitente, msg, sessionFolder, phone, isCode, caption, isAutoReconnect = false) {
+    
+    // ✅ FIX 1: Validar y limpiar número de teléfono
+    const cleanPhone = phone.replace(/\D/g, ''); // Elimina todo excepto dígitos
+    
+    if (!isAutoReconnect && isCode) {
+        // Validar formato internacional
+        if (cleanPhone.length < 10 || cleanPhone.length > 15) {
+            if (mainSock && remitente) {
+                await mainSock.sendMessage(remitente, { 
+                    text: `❌ Número inválido: *${phone}*\n\nDebe estar en formato internacional sin el símbolo +\n\nEjemplo: 34612345678` 
+                });
+            }
+            return;
+        }
+        console.log(`[SUB-BOT] Número limpio para pairing: ${cleanPhone}`);
+    }
+    
+    // ✅ FIX 2: Verificar y limpiar sesión existente si hay error
+    const credsPath = path.join(sessionFolder, 'creds.json');
+    if (!isAutoReconnect && isCode && fs.existsSync(credsPath)) {
+        console.log(`[SUB-BOT] Eliminando sesión existente en ${sessionFolder}`);
+        try {
+            fs.rmSync(sessionFolder, { recursive: true, force: true });
+            await new Promise(resolve => setTimeout(resolve, 1000));
+        } catch (e) {
+            console.error(`[SUB-BOT] Error limpiando sesión:`, e);
+        }
+    }
+    
     const { state, saveCreds } = await useMultiFileAuthState(sessionFolder);
     const { version } = await fetchLatestBaileysVersion();
 
     const subSock = makeWASocket({
         logger: pino({ level: 'silent' }),
         printQRInTerminal: false,
-        // FIX CRÍTICO: Debe coincidir con el bot principal para evitar bloqueos por fingerprinting de Meta
-        browser: ['Ubuntu', 'Chrome', '122.0.0.0'],
+        browser: Browsers.macOS('Chrome'),
         auth: {
             creds: state.creds,
             keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'silent' }))
@@ -117,7 +145,8 @@ async function startSubBot(mainSock, remitente, msg, sessionFolder, phone, isCod
     subSock.isInit = false;
     subSock.ev.on('creds.update', saveCreds);
 
-    subSock.ev.on('connection.update', async ({ connection, lastDisconnect, isNewLogin }) => {
+    // ✅ FIX 3: Mejorar manejo de conexión
+    subSock.ev.on('connection.update', async ({ connection, lastDisconnect, isNewLogin, qr }) => {
         if (isNewLogin) subSock.isInit = false;
         
         if (connection === 'open') {
@@ -129,71 +158,127 @@ async function startSubBot(mainSock, remitente, msg, sessionFolder, phone, isCod
                 global.conns.push(subSock);
             }
 
-            delete reintentos[subSock.userId || phone];
+            delete reintentos[subSock.userId || cleanPhone];
             
-            console.log(`[SUB-BOT] Conectado exitosamente: ${subSock.userId}`);
+            console.log(`[SUB-BOT] ✅ Conectado exitosamente: ${subSock.userId}`);
             if (!isAutoReconnect && mainSock && remitente) {
-                await mainSock.sendMessage(remitente, { text: `✅ *Sub-Bot conectado con éxito.*\n\nID: @${subSock.userId}`, mentions: [`${subSock.userId}@s.whatsapp.net`] });
+                await mainSock.sendMessage(remitente, { 
+                    text: `✅ *Sub-Bot conectado con éxito.*\n\nID: @${subSock.userId}\n⏱️ Sesión activa`, 
+                    mentions: [`${subSock.userId}@s.whatsapp.net`] 
+                });
             }
         }
 
         if (connection === 'close') {
-            const botId = subSock.userId || phone;
+            const botId = subSock.userId || cleanPhone;
             const reason = lastDisconnect?.error?.output?.statusCode || lastDisconnect?.reason || 0;
             const intentos = reintentos[botId] || 0;
             reintentos[botId] = intentos + 1;
 
-            if ([401, 403].includes(reason)) {
+            console.log(`[SUB-BOT] ⚠️ Conexión cerrada. Código: ${reason}, Intentos: ${intentos}/5`);
+
+            // Códigos de error críticos
+            if ([401, 403, 405].includes(reason)) {
                 if (intentos < 5) {
-                    console.log(`[SUB-BOT] ${botId} Conexión cerrada (Código ${reason}). Intento ${intentos}/5 → Reintentando en 3s...`);
-                    setTimeout(() => startSubBot(mainSock, remitente, msg, sessionFolder, phone, isCode, caption, isAutoReconnect), 3000);
+                    console.log(`[SUB-BOT] ${botId} Reintentando en 5s...`);
+                    setTimeout(() => startSubBot(mainSock, remitente, msg, sessionFolder, cleanPhone, isCode, caption, isAutoReconnect), 5000);
                 } else {
-                    console.log(`[SUB-BOT] ${botId} Falló tras 5 intentos. Eliminando sesión corrupta.`);
+                    console.log(`[SUB-BOT] ${botId} ❌ Falló tras 5 intentos. Eliminando sesión.`);
                     try { fs.rmSync(sessionFolder, { recursive: true, force: true }); } catch (e) {}
                     delete reintentos[botId];
                     if (!isAutoReconnect && mainSock && remitente) {
-                        await mainSock.sendMessage(remitente, { text: `❌ Tu sesión expiró o fue cerrada desde los ajustes de WhatsApp. El Sub-Bot fue eliminado.` });
+                        await mainSock.sendMessage(remitente, { 
+                            text: `❌ *Error de vinculación*\n\nPosibles causas:\n• Código expirado (genera uno nuevo con .code)\n• Número incorrecto en el dispositivo\n• Sesión ya vinculada en otro lugar\n\n💡 Intenta de nuevo con *.code*` 
+                        });
                     }
                 }
                 return;
             }
 
+            // Reconexión automática para errores transitorios
             if ([DisconnectReason.connectionClosed, DisconnectReason.connectionLost, DisconnectReason.timedOut, DisconnectReason.connectionReplaced].includes(reason)) {
-                setTimeout(() => startSubBot(mainSock, remitente, msg, sessionFolder, phone, isCode, caption, isAutoReconnect), 3000);
+                setTimeout(() => startSubBot(mainSock, remitente, msg, sessionFolder, cleanPhone, isCode, caption, isAutoReconnect), 3000);
                 return;
             }
             
-            setTimeout(() => startSubBot(mainSock, remitente, msg, sessionFolder, phone, isCode, caption, isAutoReconnect), 3000);
+            // Fallback para cualquier otro error
+            setTimeout(() => startSubBot(mainSock, remitente, msg, sessionFolder, cleanPhone, isCode, caption, isAutoReconnect), 5000);
         }
     });
 
-    // Petición del Pairing Code (Solo en creación manual)
+    // ✅ FIX 4: Mejorar generación de código con retry
     if (!subSock.authState.creds.registered && isCode && !isAutoReconnect && commandFlags[remitente] && mainSock) {
-        // FIX CRÍTICO: 4000ms para asegurar la negociación criptográfica del socket antes de pedir el código
+        // Esperar a que la conexión esté lista
+        const waitForConnection = new Promise((resolve) => {
+            const interval = setInterval(() => {
+                if (subSock.ws?.readyState === 1) { // WebSocket OPEN
+                    clearInterval(interval);
+                    resolve();
+                }
+            }, 500);
+            
+            // Timeout de 10 segundos
+            setTimeout(() => {
+                clearInterval(interval);
+                resolve();
+            }, 10000);
+        });
+        
+        await waitForConnection;
+        
         setTimeout(async () => {
             try {
-                let codeGen = await subSock.requestPairingCode(phone);
+                console.log(`[SUB-BOT] Solicitando código de emparejamiento para: ${cleanPhone}`);
+                
+                let codeGen = await subSock.requestPairingCode(cleanPhone);
                 codeGen = codeGen.match(/.{1,4}/g)?.join("-") || codeGen;
                 
+                console.log(`[SUB-BOT] ✅ Código generado: ${codeGen}`);
+                
                 await mainSock.sendMessage(remitente, { text: caption });
-                const msgCode = await mainSock.sendMessage(remitente, { text: codeGen });
+                const msgCode = await mainSock.sendMessage(remitente, { 
+                    text: `🔐 *CÓDIGO DE VINCULACIÓN*\n\n\`\`\`${codeGen}\`\`\`\n\n⏱️ Este código expira en *1 minuto*\n📱 Úsalo en: *Dispositivos vinculados > Vincular con número*\n\n⚠️ *IMPORTANTE:*\n• El número en tu dispositivo debe ser: *${cleanPhone}*\n• Si el código no funciona, escribe *.code* para generar uno nuevo` 
+                });
                 
                 delete commandFlags[remitente];
                 
+                // Eliminar el código después de 60 segundos
                 setTimeout(async () => {
-                    try { await mainSock.sendMessage(remitente, { delete: msgCode.key }); } catch {}
+                    try { 
+                        await mainSock.sendMessage(remitente, { delete: msgCode.key }); 
+                        await mainSock.sendMessage(remitente, { 
+                            text: `⏱️ El código ha expirado. Escribe *.code* para generar uno nuevo.` 
+                        });
+                    } catch {}
                 }, 60000);
                 
             } catch (err) {
-                console.error("[Código Error]", err);
-                await mainSock.sendMessage(remitente, { text: "❌ Error al generar el código. Si falla repetidamente, espera 1 hora." });
-                try { fs.rmSync(sessionFolder, { recursive: true, force: true }); } catch (e) {}
+                console.error("[SUB-BOT] ❌ Error generando código:", err);
+                
+                let errorMsg = "❌ *Error al generar el código*\n\n";
+                
+                if (err.message?.includes('not-authorized')) {
+                    errorMsg += "• Tu sesión expiró o fue cerrada\n• Limpia la sesión y vuelve a intentar";
+                } else if (err.message?.includes('timed out')) {
+                    errorMsg += "• Tiempo de espera agotado\n• Verifica tu conexión a internet";
+                } else {
+                    errorMsg += `• ${err.message || 'Error desconocido'}\n• Intenta de nuevo en unos segundos`;
+                }
+                
+                await mainSock.sendMessage(remitente, { text: errorMsg });
+                
+                // Limpiar sesión corrupta
+                try { 
+                    fs.rmSync(sessionFolder, { recursive: true, force: true }); 
+                    console.log(`[SUB-BOT] Sesión corrupta eliminada: ${sessionFolder}`);
+                } catch (e) {}
+                delete commandFlags[remitente];
             }
-        }, 4000);
+        }, 5000); // Delay de 5 segundos para asegurar estabilidad
     }
 
     // ==========================================
-    // EJECUCIÓN AUTÓNOMA DE PLUGINS (Igual que index.js)
+    // EJECUCIÓN AUTÓNOMA DE PLUGINS (Sin cambios)
     // ==========================================
     subSock.ev.on('messages.upsert', async (m) => {
         const message = m.messages[0];
@@ -211,14 +296,12 @@ async function startSubBot(mainSock, remitente, msg, sessionFolder, phone, isCod
         const isGroup = senderJid.endsWith('@g.us');
         if (isGroup && global.db.data.settings.grupos === false && !/^\.grupo\s+on$/i.test(textoLimpio)) return;
 
-        // Historial propio para IA
         if (!global.chatHistory) global.chatHistory = new Map();
         if (!global.chatHistory.has(senderJid)) global.chatHistory.set(senderJid, []);
         const history = global.chatHistory.get(senderJid);
         history.push({ role: message.key.fromMe ? 'model' : 'user', parts: [{ text: textoLimpio || `[Envió: ${msgType}]` }] });
         if (history.length > 25) history.shift();
 
-        // Cargar plugins en caché compartida para no saturar RAM
         if (!global.loadedPlugins) {
             const pluginsDir = path.join(process.cwd(), 'plugins');
             if (fs.existsSync(pluginsDir)) {
@@ -255,7 +338,7 @@ async function startSubBot(mainSock, remitente, msg, sessionFolder, phone, isCod
                 } catch (err) {
                     console.error(`Error en subbot plugin ${plugin.name}:`, err);
                 }
-                break; // Solo ejecuta un plugin a la vez por mensaje
+                break;
             }
         }
     });
