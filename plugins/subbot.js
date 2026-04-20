@@ -1,8 +1,9 @@
-import { Browsers, makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion, makeCacheableSignalKeyStore, DisconnectReason } from '@whiskeysockets/baileys';
+import { Browsers, makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion, makeCacheableSignalKeyStore, DisconnectReason, downloadContentFromMessage } from '@whiskeysockets/baileys';
 import fs from 'fs';
 import path from 'path';
 import pino from 'pino';
 import NodeCache from 'node-cache';
+import { pathToFileURL } from 'url';
 
 if (!global.conns) global.conns = [];
 const msgRetryCounterCache = new NodeCache({ stdTTL: 0, checkperiod: 0 });
@@ -23,18 +24,35 @@ const msToTime = (duration) => {
     return res.join(', ') || '0s';
 };
 
+// ==========================================
+// AUTO-ARRANQUE DE SUB-BOTS TRAS REINICIO DE VPS
+// ==========================================
+setTimeout(async () => {
+    const subsPath = path.join(process.cwd(), 'jadibts');
+    if (fs.existsSync(subsPath)) {
+        const botIds = fs.readdirSync(subsPath);
+        for (const id of botIds) {
+            const sessionFolder = path.join(subsPath, id);
+            if (fs.existsSync(path.join(sessionFolder, 'creds.json'))) {
+                console.log(`[SUB-BOT] Auto-reconectando sesión de @${id}...`);
+                await startSubBot(null, null, null, sessionFolder, id, false, null, true);
+                // Retraso de 3s entre arranques para no ahogar la CPU de la VPS
+                await new Promise(resolve => setTimeout(resolve, 3000));
+            }
+        }
+    }
+}, 10000); // Espera 10s para asegurarse de que el bot principal y la DB ya cargaron
+// ==========================================
+
 export default {
     name: 'subbot_avanzado',
-    // Soporta .code (recomendado para VPS) o .qr
     match: (text) => /^\.(code|qr|botclone|jadibot)$/i.test(text),
 
     execute: async ({ sock, remitente, msg, textoLimpio }) => {
         const command = textoLimpio.toLowerCase().split(' ')[0].replace('.', '');
         
-        // 1. Inicialización de usuario en DB si no existe
         if (!global.db.data.users[remitente]) global.db.data.users[remitente] = {};
         
-        // 2. Sistema de Cooldown (120 segundos)
         let lastSub = global.db.data.users[remitente].Subs || 0;
         let timeLapse = Date.now() - lastSub;
         if (timeLapse < 120000) {
@@ -43,7 +61,6 @@ export default {
             }, { quoted: msg });
         }
 
-        // 3. Control de límite de Sub-Bots (Max 50)
         const subsPath = path.join(process.cwd(), 'jadibts');
         if (!fs.existsSync(subsPath)) fs.mkdirSync(subsPath, { recursive: true });
         
@@ -54,7 +71,7 @@ export default {
 
         commandFlags[remitente] = true;
         
-        const isCode = !/^(qr)$/.test(command); // Por defecto usa Code, a menos que especifique qr
+        const isCode = !/^(qr)$/.test(command);
         const phone = remitente.split('@')[0];
         const id = phone;
         const sessionFolder = path.join(subsPath, id);
@@ -63,13 +80,14 @@ export default {
         
         global.db.data.users[remitente].Subs = Date.now();
 
-        // Iniciar el proceso del Sub-Bot
-        await startSubBot(sock, remitente, msg, sessionFolder, phone, isCode, rtx);
+        await startSubBot(sock, remitente, msg, sessionFolder, phone, isCode, rtx, false);
     }
 };
 
-// Función Core del Sub-Bot
-async function startSubBot(mainSock, remitente, msg, sessionFolder, phone, isCode, caption) {
+// ==========================================
+// NÚCLEO AUTÓNOMO DEL SUB-BOT
+// ==========================================
+async function startSubBot(mainSock, remitente, msg, sessionFolder, phone, isCode, caption, isAutoReconnect = false) {
     const { state, saveCreds } = await useMultiFileAuthState(sessionFolder);
     const { version } = await fetchLatestBaileysVersion();
 
@@ -84,7 +102,7 @@ async function startSubBot(mainSock, remitente, msg, sessionFolder, phone, isCod
         markOnlineOnConnect: true,
         generateHighQualityLinkPreview: true,
         syncFullHistory: false,
-        getMessage: async () => '', // Ignora la verificación de historial local para no saturar RAM
+        getMessage: async () => '',
         msgRetryCounterCache,
         userDevicesCache,
         cachedGroupMetadata: async (jid) => groupCache.get(jid),
@@ -111,7 +129,9 @@ async function startSubBot(mainSock, remitente, msg, sessionFolder, phone, isCod
             delete reintentos[subSock.userId || phone];
             
             console.log(`[SUB-BOT] Conectado exitosamente: ${subSock.userId}`);
-            await mainSock.sendMessage(remitente, { text: `✅ *Sub-Bot conectado con éxito.*\n\nID: @${subSock.userId}`, mentions: [`${subSock.userId}@s.whatsapp.net`] });
+            if (!isAutoReconnect && mainSock && remitente) {
+                await mainSock.sendMessage(remitente, { text: `✅ *Sub-Bot conectado con éxito.*\n\nID: @${subSock.userId}`, mentions: [`${subSock.userId}@s.whatsapp.net`] });
+            }
         }
 
         if (connection === 'close') {
@@ -120,32 +140,32 @@ async function startSubBot(mainSock, remitente, msg, sessionFolder, phone, isCod
             const intentos = reintentos[botId] || 0;
             reintentos[botId] = intentos + 1;
 
-            // Manejo de errores de autenticación (401, 403) con 5 reintentos
             if ([401, 403].includes(reason)) {
                 if (intentos < 5) {
                     console.log(`[SUB-BOT] ${botId} Conexión cerrada (Código ${reason}). Intento ${intentos}/5 → Reintentando en 3s...`);
-                    setTimeout(() => startSubBot(mainSock, remitente, msg, sessionFolder, phone, isCode, caption), 3000);
+                    setTimeout(() => startSubBot(mainSock, remitente, msg, sessionFolder, phone, isCode, caption, isAutoReconnect), 3000);
                 } else {
                     console.log(`[SUB-BOT] ${botId} Falló tras 5 intentos. Eliminando sesión corrupta.`);
                     try { fs.rmSync(sessionFolder, { recursive: true, force: true }); } catch (e) {}
                     delete reintentos[botId];
-                    await mainSock.sendMessage(remitente, { text: `❌ Tu sesión expiró o fue cerrada desde los ajustes de WhatsApp. El Sub-Bot fue eliminado.` });
+                    if (!isAutoReconnect && mainSock && remitente) {
+                        await mainSock.sendMessage(remitente, { text: `❌ Tu sesión expiró o fue cerrada desde los ajustes de WhatsApp. El Sub-Bot fue eliminado.` });
+                    }
                 }
                 return;
             }
 
-            // Manejo de desconexiones temporales de red
             if ([DisconnectReason.connectionClosed, DisconnectReason.connectionLost, DisconnectReason.timedOut, DisconnectReason.connectionReplaced].includes(reason)) {
-                setTimeout(() => startSubBot(mainSock, remitente, msg, sessionFolder, phone, isCode, caption), 3000);
+                setTimeout(() => startSubBot(mainSock, remitente, msg, sessionFolder, phone, isCode, caption, isAutoReconnect), 3000);
                 return;
             }
             
-            setTimeout(() => startSubBot(mainSock, remitente, msg, sessionFolder, phone, isCode, caption), 3000);
+            setTimeout(() => startSubBot(mainSock, remitente, msg, sessionFolder, phone, isCode, caption, isAutoReconnect), 3000);
         }
     });
 
-    // Petición del Pairing Code
-    if (!subSock.authState.creds.registered && isCode && commandFlags[remitente]) {
+    // Petición del Pairing Code (Solo en creación manual)
+    if (!subSock.authState.creds.registered && isCode && !isAutoReconnect && commandFlags[remitente] && mainSock) {
         setTimeout(async () => {
             try {
                 let codeGen = await subSock.requestPairingCode(phone);
@@ -156,7 +176,6 @@ async function startSubBot(mainSock, remitente, msg, sessionFolder, phone, isCod
                 
                 delete commandFlags[remitente];
                 
-                // Borrar el código a los 60s por seguridad
                 setTimeout(async () => {
                     try { await mainSock.sendMessage(remitente, { delete: msgCode.key }); } catch {}
                 }, 60000);
@@ -168,4 +187,72 @@ async function startSubBot(mainSock, remitente, msg, sessionFolder, phone, isCod
             }
         }, 3000);
     }
+
+    // ==========================================
+    // EJECUCIÓN AUTÓNOMA DE PLUGINS (Igual que index.js)
+    // ==========================================
+    subSock.ev.on('messages.upsert', async (m) => {
+        const message = m.messages[0];
+        if (!message.message || message.key.remoteJid === 'status@broadcast') return;
+
+        global.db.data = global.db.getState();
+        const senderJid = message.key.remoteJid;
+        const texto = message.message.conversation || message.message.extendedTextMessage?.text || "";
+        const textoLimpio = texto.trim();
+        const msgType = Object.keys(message.message).find(k => ['videoMessage', 'imageMessage', 'documentMessage', 'audioMessage'].includes(k));
+        const quoted = message.message.extendedTextMessage?.contextInfo?.quotedMessage;
+
+        if (!textoLimpio && !msgType) return;
+
+        const isGroup = senderJid.endsWith('@g.us');
+        if (isGroup && global.db.data.settings.grupos === false && !/^\.grupo\s+on$/i.test(textoLimpio)) return;
+
+        // Historial propio para IA
+        if (!global.chatHistory) global.chatHistory = new Map();
+        if (!global.chatHistory.has(senderJid)) global.chatHistory.set(senderJid, []);
+        const history = global.chatHistory.get(senderJid);
+        history.push({ role: message.key.fromMe ? 'model' : 'user', parts: [{ text: textoLimpio || `[Envió: ${msgType}]` }] });
+        if (history.length > 25) history.shift();
+
+        // Cargar plugins en caché compartida para no saturar RAM
+        if (!global.loadedPlugins) {
+            const pluginsDir = path.join(process.cwd(), 'plugins');
+            if (fs.existsSync(pluginsDir)) {
+                const pluginFiles = fs.readdirSync(pluginsDir).filter(f => f.endsWith('.js'));
+                global.loadedPlugins = await Promise.all(pluginFiles.map(async (file) => {
+                    try {
+                        const fullPath = path.join(pluginsDir, file);
+                        const module = await import(pathToFileURL(fullPath).href);
+                        return module.default || module;
+                    } catch (e) { return null; }
+                }));
+                global.loadedPlugins = global.loadedPlugins.filter(p => p !== null);
+            } else {
+                global.loadedPlugins = [];
+            }
+        }
+
+        const getMediaInfo = (msgObj) => {
+            if (!msgObj) return null;
+            if (msgObj.videoMessage) return { type: 'video', msg: msgObj.videoMessage, ext: 'mp4' };
+            if (msgObj.imageMessage) return { type: 'image', msg: msgObj.imageMessage, ext: 'jpg' };
+            if (msgObj.audioMessage) return { type: 'audio', msg: msgObj.audioMessage, ext: 'ogg' };
+            if (msgObj.documentMessage) return { type: 'document', msg: msgObj.documentMessage, ext: 'bin' };
+            return null;
+        };
+
+        const ctx = { sock: subSock, msg: message, remitente: senderJid, textoLimpio, getMediaInfo, downloadContentFromMessage, quoted, msgType };
+
+        for (const plugin of global.loadedPlugins) {
+            if (plugin.match && plugin.match(textoLimpio, ctx)) {
+                try {
+                    await plugin.execute(ctx);
+                    global.db.write();
+                } catch (err) {
+                    console.error(`Error en subbot plugin ${plugin.name}:`, err);
+                }
+                break; // Solo ejecuta un plugin a la vez por mensaje
+            }
+        }
+    });
 }
