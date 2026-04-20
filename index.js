@@ -109,6 +109,20 @@ async function iniciarBot() {
             return;
         }
 
+        // --- SISTEMA DE MEMORIA PARA IA (Últimos 25 mensajes) ---
+        if (!global.chatHistory) global.chatHistory = new Map();
+        if (!global.chatHistory.has(remitente)) global.chatHistory.set(remitente, []);
+        
+        const history = global.chatHistory.get(remitente);
+        // Guardamos quién lo envió y qué dijo
+        history.push({ 
+            role: msg.key.fromMe ? 'model' : 'user', 
+            parts: [{ text: textoLimpio || `[Envió: ${msgType}]` }] 
+        });
+        // Mantenemos solo los últimos 25
+        if (history.length > 25) history.shift();
+        // --------------------------------------------------------
+
         const ctx = { 
             sock, 
             msg, 
