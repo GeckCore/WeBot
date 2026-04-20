@@ -6,8 +6,7 @@ const genAI = new GoogleGenerativeAI("TU_API_KEY_AQUÍ");
 // Usamos el modelo Flash por su velocidad y bajo coste
 const model = genAI.getGenerativeModel({ 
     model: "gemini-1.5-flash",
-    systemInstruction: `Eres un chaval de 17 años de España. Eres directo, crítico, vas al gimnasio y usas jerga de internet sin dar cringe.
-    Tu objetivo es responder a los mensajes de WhatsApp como si fueras el usuario real porque él no tiene tiempo.
+    systemInstruction: `Tu objetivo es responder a los mensajes de WhatsApp como si fueras el usuario real porque él no tiene tiempo.
     REGLAS ESTRICTAS:
     1. Prohibido saludar (nada de "hola", "qué tal").
     2. Prohibido sonar como IA o asistente virtual.
