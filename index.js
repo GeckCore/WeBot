@@ -1,3 +1,4 @@
+require('dotenv').config(); // Carga el archivo .env para las llaves de API
 const { default: makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion, downloadContentFromMessage } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode-terminal');
 const fs = require('fs');
@@ -11,31 +12,34 @@ const FileSync = require('lowdb/adapters/FileSync');
 const adapter = new FileSync('database.json');
 global.db = low(adapter);
 
-// Inicialización con el ajuste de grupos por defecto en true (on)
 global.db.defaults({ 
     users: {}, 
     chats: {}, 
-    settings: { grupos: true } 
+    settings: { grupos: true, autosticker: false } 
 }).write();
 
 console.log('[INFO] Base de datos JSON cargada y lista.');
 
 // --- OPTIMIZACIÓN DE ARRANQUE: BINARIOS ---
 const isWindows = process.platform === 'win32';
-const binarios = ['yt-dlp', 'ffmpeg'];
+// Añadimos webpmux a la lista de ejecución obligatoria
+const binarios = ['yt-dlp', 'ffmpeg', 'webpmux']; 
 binarios.forEach(bin => {
     const fileName = isWindows ? `${bin}.exe` : bin;
     const binPath = path.join(__dirname, fileName);
     if (fs.existsSync(binPath) && !isWindows) {
-        try { fs.chmodSync(binPath, '755'); } catch (e) {}
+        try { 
+            fs.chmodSync(binPath, '755'); 
+        } catch (e) {
+            console.error(`[ERROR] No se pudo dar permisos a ${fileName}`);
+        }
     }
 });
 
-// Variable global para los plugins
 let plugins = [];
 
 async function iniciarBot() {
-    // --- CARGA DINÁMICA DE PLUGINS (Soporte para ESM y Top-level await) ---
+    // --- CARGA DINÁMICA DE PLUGINS ---
     const pluginsDir = path.join(__dirname, 'plugins');
     if (!fs.existsSync(pluginsDir)) fs.mkdirSync(pluginsDir);
     
@@ -104,24 +108,18 @@ async function iniciarBot() {
         const isGroup = remitente.endsWith('@g.us');
         const settings = global.db.data.settings;
 
-        // Si es un grupo y el bot está en 'off', ignoramos todo excepto el comando para encenderlo
-        if (isGroup && settings.grupos === false && !/^\.grupo\s+on$/i.test(textoLimpio)) {
-            return;
-        }
+        if (isGroup && settings.grupos === false && !/^\.grupo\s+on$/i.test(textoLimpio)) return;
 
-        // --- SISTEMA DE MEMORIA PARA IA (Últimos 25 mensajes) ---
+        // --- SISTEMA DE MEMORIA PARA IA ---
         if (!global.chatHistory) global.chatHistory = new Map();
         if (!global.chatHistory.has(remitente)) global.chatHistory.set(remitente, []);
         
         const history = global.chatHistory.get(remitente);
-        // Guardamos quién lo envió y qué dijo
         history.push({ 
             role: msg.key.fromMe ? 'model' : 'user', 
             parts: [{ text: textoLimpio || `[Envió: ${msgType}]` }] 
         });
-        // Mantenemos solo los últimos 25
         if (history.length > 25) history.shift();
-        // --------------------------------------------------------
 
         const ctx = { 
             sock, 
