@@ -1,4 +1,3 @@
-require('dotenv').config(); // Carga el archivo .env para las llaves de API
 const { default: makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion, downloadContentFromMessage } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode-terminal');
 const fs = require('fs');
@@ -22,8 +21,8 @@ console.log('[INFO] Base de datos JSON cargada y lista.');
 
 // --- OPTIMIZACIÓN DE ARRANQUE: BINARIOS ---
 const isWindows = process.platform === 'win32';
-// Añadimos webpmux a la lista de ejecución obligatoria
 const binarios = ['yt-dlp', 'ffmpeg', 'webpmux']; 
+
 binarios.forEach(bin => {
     const fileName = isWindows ? `${bin}.exe` : bin;
     const binPath = path.join(__dirname, fileName);
@@ -109,17 +108,6 @@ async function iniciarBot() {
         const settings = global.db.data.settings;
 
         if (isGroup && settings.grupos === false && !/^\.grupo\s+on$/i.test(textoLimpio)) return;
-
-        // --- SISTEMA DE MEMORIA PARA IA ---
-        if (!global.chatHistory) global.chatHistory = new Map();
-        if (!global.chatHistory.has(remitente)) global.chatHistory.set(remitente, []);
-        
-        const history = global.chatHistory.get(remitente);
-        history.push({ 
-            role: msg.key.fromMe ? 'model' : 'user', 
-            parts: [{ text: textoLimpio || `[Envió: ${msgType}]` }] 
-        });
-        if (history.length > 25) history.shift();
 
         const ctx = { 
             sock, 
