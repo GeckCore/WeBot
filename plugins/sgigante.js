@@ -28,14 +28,13 @@ export default {
         const mediaInfo = getMediaInfo(quoted);
         if (mediaInfo.type !== 'image' && mediaInfo.type !== 'video') return;
 
-        await sock.sendMessage(remitente, { text: "⏳ Aplicando exploit Chomp (v3)..." }, { quoted: msg });
+        const statusMsg = await sock.sendMessage(remitente, { text: "⏳ Generando Glitch..." }, { quoted: msg });
         
         const idStr = Date.now().toString();
         const tmpDir = path.resolve('./tmp');
         if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir);
 
         const inputPath = path.join(tmpDir, `in_${idStr}`);
-        const midPath = path.join(tmpDir, `mid_${idStr}.png`); // Paso intermedio para vídeos
         const tempWebpPath = path.join(tmpDir, `raw_${idStr}.webp`);
         const exifPath = path.join(tmpDir, `exif_${idStr}.exif`);
         const outputPath = path.join(tmpDir, `out_${idStr}.webp`);
@@ -48,32 +47,36 @@ export default {
 
             const isVideo = mediaInfo.type === 'video';
             const ffmpegPath = path.resolve('./ffmpeg');
-            const cwebpPath = path.resolve('./cwebp');
             const webpmuxPath = path.resolve('./webpmux');
 
-            if (isVideo) {
-                // Para video, sacamos un frame limpio con ffmpeg y luego cwebp lo remata
-                await execPromise(`"${ffmpegPath}" -i "${inputPath}" -vframes 1 -vf "scale=512:-2" "${midPath}" -y`);
-                await execPromise(`"${cwebpPath}" "${midPath}" -o "${tempWebpPath}" -q 80`);
-            } else {
-                // Para imagen, cwebp directo (es mucho más limpio que ffmpeg)
-                await execPromise(`"${cwebpPath}" "${inputPath}" -resize 512 0 -o "${tempWebpPath}" -q 80`);
-            }
+            // FILTRO ESTRICTO: Encaja la imagen en 512x512 y rellena lo sobrante con transparencia absoluta.
+            // Esto garantiza un 100% de aceptación por parte de los servidores de WhatsApp.
+            const scaleFilter = "scale=512:512:force_original_aspect_ratio=decrease,format=rgba,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=#00000000";
+            
+            const cmdFfmpeg = isVideo 
+                ? `"${ffmpegPath}" -i "${inputPath}" -vcodec libwebp -vf "${scaleFilter},fps=15" -lossless 0 -compression_level 4 -q:v 50 -loop 0 -preset picture -an -t 5 "${tempWebpPath}" -y`
+                : `"${ffmpegPath}" -i "${inputPath}" -vcodec libwebp -vf "${scaleFilter}" -lossless 0 -compression_level 4 -q:v 70 -preset picture -an "${tempWebpPath}" -y`;
 
-            if (!fs.existsSync(tempWebpPath)) throw new Error("Fallo en la codificación WebP.");
+            await execPromise(cmdFfmpeg);
 
-            fs.writeFileSync(exifPath, createSpoofedExif("Chomp Glitch", "Gemini Bot"));
+            if (!fs.existsSync(tempWebpPath)) throw new Error("FFMPEG falló al codificar.");
 
-            // Inyección EXIF (Ahora cwebp garantiza que el archivo es compatible)
+            // Inyectamos el ID oficial de Chomp
+            fs.writeFileSync(exifPath, createSpoofedExif("Chomp Glitch", "Gemini"));
+
+            // Ensamblamos el EXIF con el WebP limpio
             await execPromise(`"${webpmuxPath}" -set exif "${exifPath}" "${tempWebpPath}" -o "${outputPath}"`);
 
+            // Enviamos
             await sock.sendMessage(remitente, { sticker: fs.readFileSync(outputPath) }, { quoted: msg });
+            await sock.sendMessage(remitente, { delete: statusMsg.key });
 
         } catch (err) {
             console.error("Error Glitch Sticker:", err);
             await sock.sendMessage(remitente, { text: `❌ Error: ${err.message}` });
         } finally {
-            [inputPath, midPath, tempWebpPath, exifPath, outputPath].forEach(file => {
+            // Limpieza
+            [inputPath, tempWebpPath, exifPath, outputPath].forEach(file => {
                 if (fs.existsSync(file)) try { fs.unlinkSync(file); } catch(e) {}
             });
         }
