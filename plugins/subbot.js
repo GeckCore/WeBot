@@ -72,7 +72,9 @@ export default {
         commandFlags[remitente] = true;
         
         const isCode = !/^(qr)$/.test(command);
-        const phone = remitente.split('@')[0];
+        
+        // FIX CRÍTICO: Limpieza estricta del número. Si el remitente es "34600000000:1@s.whatsapp.net", extrae solo "34600000000"
+        const phone = remitente.split('@')[0].split(':')[0].replace(/[^0-9]/g, '');
         const id = phone;
         const sessionFolder = path.join(subsPath, id);
 
@@ -94,7 +96,8 @@ async function startSubBot(mainSock, remitente, msg, sessionFolder, phone, isCod
     const subSock = makeWASocket({
         logger: pino({ level: 'silent' }),
         printQRInTerminal: false,
-        browser: Browsers.macOS('Chrome'),
+        // FIX CRÍTICO: Debe coincidir con el bot principal para evitar bloqueos por fingerprinting de Meta
+        browser: ['Ubuntu', 'Chrome', '122.0.0.0'],
         auth: {
             creds: state.creds,
             keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'silent' }))
@@ -166,6 +169,7 @@ async function startSubBot(mainSock, remitente, msg, sessionFolder, phone, isCod
 
     // Petición del Pairing Code (Solo en creación manual)
     if (!subSock.authState.creds.registered && isCode && !isAutoReconnect && commandFlags[remitente] && mainSock) {
+        // FIX CRÍTICO: 4000ms para asegurar la negociación criptográfica del socket antes de pedir el código
         setTimeout(async () => {
             try {
                 let codeGen = await subSock.requestPairingCode(phone);
@@ -182,10 +186,10 @@ async function startSubBot(mainSock, remitente, msg, sessionFolder, phone, isCod
                 
             } catch (err) {
                 console.error("[Código Error]", err);
-                await mainSock.sendMessage(remitente, { text: "❌ Error al generar el código. Intenta de nuevo más tarde." });
+                await mainSock.sendMessage(remitente, { text: "❌ Error al generar el código. Si falla repetidamente, espera 1 hora." });
                 try { fs.rmSync(sessionFolder, { recursive: true, force: true }); } catch (e) {}
             }
-        }, 3000);
+        }, 4000);
     }
 
     // ==========================================
