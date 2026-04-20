@@ -28,13 +28,14 @@ export default {
         const mediaInfo = getMediaInfo(quoted);
         if (mediaInfo.type !== 'image' && mediaInfo.type !== 'video') return;
 
-        const statusMsg = await sock.sendMessage(remitente, { text: "⏳ Inyectando exploit en WebP limpio..." }, { quoted: msg });
+        await sock.sendMessage(remitente, { text: "⏳ Aplicando exploit Chomp (v3)..." }, { quoted: msg });
         
         const idStr = Date.now().toString();
         const tmpDir = path.resolve('./tmp');
         if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir);
 
         const inputPath = path.join(tmpDir, `in_${idStr}`);
+        const midPath = path.join(tmpDir, `mid_${idStr}.png`); // Paso intermedio para vídeos
         const tempWebpPath = path.join(tmpDir, `raw_${idStr}.webp`);
         const exifPath = path.join(tmpDir, `exif_${idStr}.exif`);
         const outputPath = path.join(tmpDir, `out_${idStr}.webp`);
@@ -47,34 +48,32 @@ export default {
 
             const isVideo = mediaInfo.type === 'video';
             const ffmpegPath = path.resolve('./ffmpeg');
+            const cwebpPath = path.resolve('./cwebp');
             const webpmuxPath = path.resolve('./webpmux');
 
-            // CLAVE: -map_metadata -1 para limpiar el archivo y yuva420p para el canal alfa
-            const cmdFfmpeg = isVideo 
-                ? `"${ffmpegPath}" -i "${inputPath}" -vcodec libwebp -filter:v "fps=15,scale=512:-2:flags=lanczos" -pix_fmt yuva420p -map_metadata -1 -lossless 0 -compression_level 4 -q:v 70 -loop 0 -preset picture -an -t 6 "${tempWebpPath}" -y`
-                : `"${ffmpegPath}" -i "${inputPath}" -vcodec libwebp -filter:v "scale=512:-2:flags=lanczos" -pix_fmt yuva420p -map_metadata -1 -lossless 0 -compression_level 4 -q:v 80 -preset picture -an "${tempWebpPath}" -y`;
-
-            await execPromise(cmdFfmpeg);
-
-            if (!fs.existsSync(tempWebpPath) || fs.statSync(tempWebpPath).size < 100) {
-                throw new Error("FFMPEG falló al generar un WebP compatible.");
+            if (isVideo) {
+                // Para video, sacamos un frame limpio con ffmpeg y luego cwebp lo remata
+                await execPromise(`"${ffmpegPath}" -i "${inputPath}" -vframes 1 -vf "scale=512:-2" "${midPath}" -y`);
+                await execPromise(`"${cwebpPath}" "${midPath}" -o "${tempWebpPath}" -q 80`);
+            } else {
+                // Para imagen, cwebp directo (es mucho más limpio que ffmpeg)
+                await execPromise(`"${cwebpPath}" "${inputPath}" -resize 512 0 -o "${tempWebpPath}" -q 80`);
             }
 
-            fs.writeFileSync(exifPath, createSpoofedExif("Chomp Exploit", "Gemini Bot"));
+            if (!fs.existsSync(tempWebpPath)) throw new Error("Fallo en la codificación WebP.");
 
-            // Ahora webpmux debería leer el archivo sin protestar
+            fs.writeFileSync(exifPath, createSpoofedExif("Chomp Glitch", "Gemini Bot"));
+
+            // Inyección EXIF (Ahora cwebp garantiza que el archivo es compatible)
             await execPromise(`"${webpmuxPath}" -set exif "${exifPath}" "${tempWebpPath}" -o "${outputPath}"`);
 
-            if (!fs.existsSync(outputPath)) throw new Error("Fallo al multiplexar metadatos.");
-
             await sock.sendMessage(remitente, { sticker: fs.readFileSync(outputPath) }, { quoted: msg });
-            await sock.sendMessage(remitente, { delete: statusMsg.key });
 
         } catch (err) {
             console.error("Error Glitch Sticker:", err);
-            await sock.sendMessage(remitente, { text: `❌ Error: ${err.message.includes('mux object') ? 'El WebP generado no es compatible con el muxer.' : err.message}` });
+            await sock.sendMessage(remitente, { text: `❌ Error: ${err.message}` });
         } finally {
-            [inputPath, tempWebpPath, exifPath, outputPath].forEach(file => {
+            [inputPath, midPath, tempWebpPath, exifPath, outputPath].forEach(file => {
                 if (fs.existsSync(file)) try { fs.unlinkSync(file); } catch(e) {}
             });
         }
