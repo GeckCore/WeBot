@@ -5,17 +5,61 @@ if (!global.memesCache) global.memesCache = new Set();
 
 export default {
     name: 'carrusel_memes',
-    // Ahora interceptamos tanto texto normal como IDs ocultos de botones
     match: (text, { msg }) => {
-        const buttonId = msg?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.id || '';
+        // Captura múltiples estructuras de mensajes de botón
+        let buttonId = '';
+        
+        try {
+            // Estructura nueva de WhatsApp (nativeFlowResponseMessage)
+            if (msg?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson) {
+                const params = JSON.parse(msg.message.interactiveResponseMessage.nativeFlowResponseMessage.paramsJson);
+                buttonId = params.id || '';
+            }
+        } catch (e) {
+            // Silencioso - intentamos otras rutas
+        }
+        
+        // Fallback a otras estructuras posibles
+        if (!buttonId) {
+            buttonId = msg?.message?.buttonsResponseMessage?.selectedButtonId 
+                || msg?.message?.listResponseMessage?.singleSelectReply?.selectedRowId
+                || msg?.message?.templateButtonReplyMessage?.selectedId
+                || '';
+        }
+        
         const comando = text || buttonId;
         return /^\.(memes|cargar_mas_memes)$/i.test(comando);
     },
+    
     execute: async ({ sock, remitente, msg, textoLimpio }) => {
         
-        // Extraemos la entrada, venga de donde venga
-        const buttonId = msg?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.id || '';
-        const input = (textoLimpio || buttonId).toLowerCase();
+        // Extraemos la entrada de múltiples fuentes posibles
+        let buttonId = '';
+        
+        try {
+            // Estructura nueva de WhatsApp
+            if (msg?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson) {
+                const params = JSON.parse(msg.message.interactiveResponseMessage.nativeFlowResponseMessage.paramsJson);
+                buttonId = params.id || '';
+            }
+        } catch (e) {
+            console.log('[DEBUG] Error parseando paramsJson:', e.message);
+        }
+        
+        // Fallback
+        if (!buttonId) {
+            buttonId = msg?.message?.buttonsResponseMessage?.selectedButtonId 
+                || msg?.message?.listResponseMessage?.singleSelectReply?.selectedRowId
+                || msg?.message?.templateButtonReplyMessage?.selectedId
+                || '';
+        }
+        
+        const input = (textoLimpio || buttonId).toLowerCase().trim();
+        
+        // Debug log
+        console.log('[DEBUG] Input detectado:', input);
+        console.log('[DEBUG] Texto limpio:', textoLimpio);
+        console.log('[DEBUG] Button ID:', buttonId);
         
         // --- INTERCEPTOR DEL BOTÓN TRAMPA ---
         if (input === '.cargar_mas_memes') {
@@ -72,8 +116,8 @@ export default {
                         nativeFlowMessage: { 
                             buttons: [
                                 // El ID oculto que WhatsApp enviará al tocar el botón
-                                { name: "quick_reply", buttonParamsJson: '{"display_text":"🔄 Cargar otros","id":".cargar_mas_memes"}' },
-                                { name: "cta_url", buttonParamsJson: `{"display_text":"🌐 Ver original","url":"${meme.postLink}","merchant_url":"${meme.postLink}"}` }
+                                { name: "quick_reply", buttonParamsJson: JSON.stringify({ display_text: "🔄 Cargar otros", id: ".cargar_mas_memes" }) },
+                                { name: "cta_url", buttonParamsJson: JSON.stringify({ display_text: "🌐 Ver original", url: meme.postLink, merchant_url: meme.postLink }) }
                             ] 
                         }
                     });
