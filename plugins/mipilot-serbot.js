@@ -1,185 +1,141 @@
-import { makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion, jidNormalizedUser, makeCacheableSignalKeyStore, delay } from '@whiskeysockets/baileys';
+import { default as makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion, DisconnectReason, downloadContentFromMessage } from '@whiskeysockets/baileys';
+import qrcode from 'qrcode';
 import fs from 'fs';
 import path from 'path';
-import pino from 'pino';
+import { pathToFileURL } from 'url';
 
-if (!global.conns) global.conns = [];
+// Caché global de plugins para clones: evita saturar la RAM recargando archivos del disco por cada amigo que se conecte
+let clonePlugins = null;
 
 export default {
-    name: 'mipilot_jadibot',
-    // Captura los tres comandos adaptados
-    match: (text) => /^\.(jadibot|serbot|botclone|txbot|getcode|code)(\s+.*)?$/i.test(text),
+    name: 'botclone',
+    match: (text) => /^\.(botclone|jadibot)$/i.test(text),
+    execute: async ({ sock, remitente, msg }) => {
+        
+        const statusMsg = await sock.sendMessage(remitente, { text: "⏳ Levantando sub-instancia. Generando código QR..." }, { quoted: msg });
 
-    execute: async ({ sock, remitente, msg, textoLimpio }) => {
-        const args = textoLimpio.trim().split(/\s+/);
-        const command = args[0].toLowerCase().replace('.', '');
-        const textParams = args.slice(1).join(' ');
+        const cloneId = remitente.split('@')[0];
+        const clonesDir = path.resolve('./clones');
+        if (!fs.existsSync(clonesDir)) fs.mkdirSync(clonesDir);
+        
+        const sessionDir = path.join(clonesDir, `session_${cloneId}`);
 
-        // FIX CRÍTICO: Obtener el número real del usuario, no el ID del grupo.
-        const userJid = msg.key?.participant || remitente;
-        const userNumber = userJid.split('@')[0];
-        const sessionPath = path.join(process.cwd(), 'jadibts', userNumber);
+        const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
+        const { version } = await fetchLatestBaileysVersion();
 
-        // ==========================================
-        // 1. COMANDO TXBOT (Broadcast a Sub-Bots)
-        // ==========================================
-        if (command === 'txbot') {
-            if (jidNormalizedUser(sock.user.id) !== jidNormalizedUser(userJid)) {
-                return sock.sendMessage(remitente, { text: '❌ Este comando es exclusivo del Bot Principal.' }, { quoted: msg });
-            }
+        const cloneSock = makeWASocket({
+            version,
+            auth: state,
+            printQRInTerminal: false,
+            browser: ['Ubuntu', 'Chrome', '122.0.0.0'],
+            syncFullHistory: false
+        });
 
-            if (!textParams) {
-                return sock.sendMessage(remitente, { text: '⚠️ Escribe el mensaje a transmitir.\nEjemplo: `.txbot Reinicio programado en 5 min.`' }, { quoted: msg });
-            }
+        cloneSock.ev.on('creds.update', saveCreds);
 
-            const activeSubBots = global.conns.filter(c => c.user).map(c => jidNormalizedUser(c.user.id));
-            const uniqueSubBots = [...new Set(activeSubBots)];
+        cloneSock.ev.on('connection.update', async (update) => {
+            const { connection, lastDisconnect, qr } = update;
 
-            if (uniqueSubBots.length === 0) {
-                return sock.sendMessage(remitente, { text: '❌ No hay Sub-Bots conectados en este momento.' }, { quoted: msg });
-            }
-
-            await sock.sendMessage(remitente, { text: `⏳ *Transmitiendo a ${uniqueSubBots.length} Sub-Bots...*` }, { quoted: msg });
-
-            const broadcastMsg = `📢 *COMUNICADO DEL BOT PRINCIPAL*\n────────────────────\n\n${textParams}`;
-
-            for (const jid of uniqueSubBots) {
-                await delay(1500); 
-                await sock.sendMessage(jid, { text: broadcastMsg });
-            }
-
-            return sock.sendMessage(remitente, { text: '✅ Transmisión finalizada con éxito.' }, { quoted: msg });
-        }
-
-        // ==========================================
-        // 2. COMANDO GETCODE (Estado de la Sesión)
-        // ==========================================
-        if (command === 'getcode' || command === 'code') {
-            const credsPath = path.join(sessionPath, 'creds.json');
-            
-            if (!fs.existsSync(credsPath)) {
-                return sock.sendMessage(remitente, { text: `❌ Aún no eres Sub-Bot.\n\nUsa: *.botclone* para vincularte.` }, { quoted: msg });
-            }
-
-            const txt = `
-┌─⊷  🤖 *TU SUB-BOT*
-▢ 👤 *Número:* wa.me/${userNumber}
-▢ 📂 *Carpeta:* jadibts/${userNumber}
-▢ 🟢 *Estado:* Activo / Guardado
-└──────────────`.trim();
-
-            return sock.sendMessage(remitente, { text: txt }, { quoted: msg });
-        }
-
-        // ==========================================
-        // 3. COMANDO BOTCLONE / JADIBOT (Pairing Code)
-        // ==========================================
-        if (['jadibot', 'serbot', 'botclone'].includes(command)) {
-            const existingConn = global.conns.find(c => c.user && (jidNormalizedUser(c.user.id) === jidNormalizedUser(userJid)));
-            if (existingConn) {
-                return sock.sendMessage(remitente, { text: '⚠️ Ya tienes una sesión activa conectada a esta VPS.' }, { quoted: msg });
-            }
-
-            // Limpieza previa: Si la carpeta existe pero no tiene credenciales, está corrupta. La borramos.
-            if (fs.existsSync(sessionPath) && !fs.existsSync(path.join(sessionPath, 'creds.json'))) {
-                fs.rmSync(sessionPath, { recursive: true, force: true });
-            }
-
-            if (!fs.existsSync(sessionPath)) {
-                fs.mkdirSync(sessionPath, { recursive: true });
-            }
-
-            await sock.sendMessage(remitente, { text: '⏳ Preparando la encriptación y solicitando código a Meta...' }, { quoted: msg });
-
-            async function startSubBot() {
-                const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
-                const { version } = await fetchLatestBaileysVersion();
-
-                const subSock = makeWASocket({
-                    version,
-                    auth: {
-                        creds: state.creds,
-                        keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'silent' }))
-                    },
-                    logger: pino({ level: 'silent' }),
-                    printQRInTerminal: false,
-                    browser: ['Ubuntu', 'Chrome', '122.0.0.0'], 
-                    syncFullHistory: false,
-                    markOnlineOnConnect: true,
-                    getMessage: async (key) => {
-                        return global.store?.loadMessage?.(key.remoteJid, key.id)?.message || undefined;
-                    }
-                });
-
-                subSock.ev.on('creds.update', saveCreds);
-
-                // --- GENERACIÓN DEL PAIRING CODE ---
-                if (!subSock.authState.creds.registered) {
-                    setTimeout(async () => {
-                        try {
-                            const cleanNumber = userNumber.replace(/[^0-9]/g, '');
-                            let codeBot = await subSock.requestPairingCode(cleanNumber);
-                            codeBot = codeBot?.match(/.{1,4}/g)?.join("-") || codeBot;
-
-                            const instruction = `➤ *CÓDIGO DE VINCULACIÓN*\n\n*${codeBot}*\n\n1. Abre tu WhatsApp\n2. Toca en el Menú ⋮ o Configuración\n3. Dispositivos vinculados\n4. Vincular con número de teléfono\n5. Introduce este código de 8 letras.\n\n_⚠️ Tienes 30 segundos antes de que el código expire por seguridad de Meta._`;
-
-                            await sock.sendMessage(remitente, { text: instruction }, { quoted: msg });
-                        } catch (e) {
-                            console.error("Error generando pairing code:", e);
-                            sock.sendMessage(remitente, { text: '❌ Error técnico al solicitar el código a Meta. Si has intentado mucho, espera 1 hora por el límite de WhatsApp.' });
-                            try { fs.rmSync(sessionPath, { recursive: true, force: true }); } catch (err) {}
-                        }
-                    }, 4000);
+            if (qr) {
+                try {
+                    const qrBuffer = await qrcode.toBuffer(qr, { scale: 8 });
+                    await sock.sendMessage(remitente, {
+                        image: qrBuffer,
+                        caption: "📲 *ESCANEA ESTE QR*\nAbre WhatsApp en el otro teléfono > Dispositivos vinculados > Vincular un dispositivo.\nEl QR se actualizará automáticamente si caduca."
+                    }, { quoted: msg });
+                    await sock.sendMessage(remitente, { delete: statusMsg.key }).catch(()=>{});
+                } catch (e) {
+                    console.error("Error al generar imagen QR:", e);
                 }
-
-                // --- MANEJO DE CONEXIÓN DEL SUB-BOT ---
-                subSock.ev.on('connection.update', async (update) => {
-                    const { connection, lastDisconnect } = update;
-
-                    if (connection === 'open') {
-                        subSock.isSubBot = true;
-                        subSock.uptime = Date.now();
-                        if (!global.conns.includes(subSock)) global.conns.push(subSock);
-                        
-                        await sock.sendMessage(remitente, { 
-                            text: `✅ *Sub-Bot Conectado con éxito.*\n\nNúmero: @${userNumber}\nTu bot ya está operativo.`,
-                            mentions: [userJid]
-                        });
-                        
-                        console.log(`[SUB-BOT] Sesión estable abierta por ${userNumber}`);
-                    }
-
-                    if (connection === 'close') {
-                        const code = lastDisconnect?.error?.output?.statusCode;
-                        const reason = lastDisconnect?.error?.output?.payload?.message || 'Desconocida';
-                        const isLogout = code === 401; // 401 = Sesión cerrada desde el móvil / Error de llaves
-
-                        console.log(`[SUB-BOT] Conexión cerrada para ${userNumber}. Razón: ${reason} (${code})`);
-
-                        const index = global.conns.indexOf(subSock);
-                        if (index > -1) global.conns.splice(index, 1);
-
-                        if (!isLogout && code !== 405) { 
-                            console.log(`[SUB-BOT] Reintentando conexión para ${userNumber} en 5 segundos...`);
-                            setTimeout(() => startSubBot(), 5000);
-                        } else {
-                            fs.rmSync(sessionPath, { recursive: true, force: true });
-                            if (isLogout) {
-                                await sock.sendMessage(remitente, { text: '❌ Has cerrado la sesión desde tu WhatsApp o el código expiró. Tu Sub-Bot ha sido eliminado de la VPS.' });
-                            }
-                        }
-                    }
-                });
-
-                subSock.ev.on('messages.upsert', async (m) => {
-                    // Delegación de comandos futuros para sub-bots
-                });
             }
 
-            startSubBot().catch(err => {
-                console.error('Error fatal iniciando Sub-Bot:', err);
-                sock.sendMessage(remitente, { text: '❌ Fallo crítico al iniciar el sub-bot. Revisa la consola.' });
-            });
+            if (connection === 'close') {
+                const reason = lastDisconnect?.error?.output?.statusCode;
+                if (reason === DisconnectReason.loggedOut) {
+                    await sock.sendMessage(remitente, { text: "❌ Sesión cerrada desde el móvil. La instancia ha sido destruida. Usa el comando de nuevo para reconectar." });
+                    fs.rmSync(sessionDir, { recursive: true, force: true });
+                } else {
+                    console.log(`[CLON ${cloneId}] Desconexión técnica. El sistema intentará reconectar automáticamente.`);
+                }
+            } else if (connection === 'open') {
+                await sock.sendMessage(remitente, { text: "✅ Conexión establecida. La sub-instancia ya está operando y escuchando comandos." });
+            }
+        });
+
+        // Carga y mapeo de los mismos plugins que usa la instancia principal
+        if (!clonePlugins) {
+            const pluginsDir = path.resolve('./plugins');
+            const pluginFiles = fs.readdirSync(pluginsDir).filter(file => file.endsWith('.js'));
+            clonePlugins = await Promise.all(pluginFiles.map(async (file) => {
+                try {
+                    const fullPath = path.join(pluginsDir, file);
+                    const module = await import(pathToFileURL(fullPath).href);
+                    return module.default || module;
+                } catch (err) {
+                    return null;
+                }
+            }));
+            clonePlugins = clonePlugins.filter(p => p !== null);
         }
+
+        const getMediaInfo = (msgObj) => {
+            if (!msgObj) return null;
+            if (msgObj.videoMessage) return { type: 'video', msg: msgObj.videoMessage, ext: 'mp4' };
+            if (msgObj.imageMessage) return { type: 'image', msg: msgObj.imageMessage, ext: 'jpg' };
+            if (msgObj.audioMessage) return { type: 'audio', msg: msgObj.audioMessage, ext: 'ogg' };
+            if (msgObj.documentMessage) return { type: 'document', msg: msgObj.documentMessage, ext: 'bin' };
+            return null;
+        };
+
+        // Motor de escucha para la sub-instancia
+        cloneSock.ev.on('messages.upsert', async (m) => {
+            const cloneMsg = m.messages[0];
+            if (!cloneMsg.message || cloneMsg.key.remoteJid === 'status@broadcast') return;
+
+            const cloneRemitente = cloneMsg.key.remoteJid;
+            
+            let texto = cloneMsg.message.conversation || cloneMsg.message.extendedTextMessage?.text || "";
+            let buttonText = "";
+            try {
+                if (cloneMsg?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson) {
+                    buttonText = JSON.parse(cloneMsg.message.interactiveResponseMessage.nativeFlowResponseMessage.paramsJson).id || "";
+                }
+            } catch (e) {}
+            
+            if (!buttonText) {
+                buttonText = cloneMsg?.message?.buttonsResponseMessage?.selectedButtonId || cloneMsg?.message?.listResponseMessage?.singleSelectReply?.selectedRowId || cloneMsg?.message?.templateButtonReplyMessage?.selectedId || "";
+            }
+            if (buttonText) texto = buttonText;
+
+            const textoLimpio = texto.trim();
+            const msgType = Object.keys(cloneMsg.message).find(k => ['videoMessage', 'imageMessage', 'documentMessage', 'audioMessage'].includes(k));
+            const quoted = cloneMsg.message.extendedTextMessage?.contextInfo?.quotedMessage;
+
+            if (!textoLimpio && !msgType && !buttonText) return;
+
+            const ctx = { 
+                sock: cloneSock, 
+                msg: cloneMsg, 
+                remitente: cloneRemitente, 
+                textoLimpio, 
+                getMediaInfo, 
+                downloadContentFromMessage, 
+                quoted, 
+                msgType 
+            };
+
+            for (const plugin of clonePlugins) {
+                if (plugin.match && plugin.match(textoLimpio, ctx)) {
+                    try {
+                        await plugin.execute(ctx);
+                        // Sincroniza la DB global para que los datos del clon se guarden
+                        global.db.write();
+                    } catch (err) {
+                        console.error(`Error en clon ${cloneId} plugin ${plugin.name}:`, err);
+                    }
+                    break;
+                }
+            }
+        });
     }
 };
