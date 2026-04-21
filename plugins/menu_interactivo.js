@@ -5,20 +5,21 @@ export default {
     match: (text) => /^\.menu$/i.test(text),
     execute: async ({ sock, remitente, msg }) => {
         try {
-            // Estructura del cajón desplegable (Bottom Sheet)
+            console.log("[INFO] Construyendo menú desplegable para:", remitente);
+
+            // Estructura purgada y universal. Sin parámetros experimentales.
             const listParams = {
-                title: "Desplegar herramientas",
+                title: "Ver herramientas",
                 sections: [
                     {
-                        title: "⚙️ UTILIDADES TÉCNICAS",
-                        highlight_label: "Útil", // Etiqueta verde que llama la atención
+                        title: "Utilidades",
                         rows: [
-                            { id: ".hd", title: "Mejorar calidad (HD)", description: "Upscaling de imagen con VectorInk" },
-                            { id: ".sg", title: "Sticker Glitch", description: "Corrompe una imagen/video con exploit Chomp" }
+                            { id: ".hd", title: "Mejorar calidad (HD)", description: "Upscaling de imagen con IA" },
+                            { id: ".sg", title: "Sticker Glitch", description: "Exploit visual Chomp" }
                         ]
                     },
                     {
-                        title: "🦍 ENTRETENIMIENTO",
+                        title: "Entretenimiento",
                         rows: [
                             { id: ".memes", title: "Shitpost (ES)", description: "Carrusel interactivo de Reddit" }
                         ]
@@ -26,13 +27,12 @@ export default {
                 ]
             };
 
-            // Construcción del mensaje interactivo
             const interactiveMessage = {
                 header: {
-                    title: "✦ *TERMINAL PRINCIPAL* ✦",
+                    title: "✦ TERMINAL PRINCIPAL ✦",
                     hasMediaAttachment: false
                 },
-                body: { text: "Selecciona un módulo del sistema para ejecutarlo instantáneamente." },
+                body: { text: "Selecciona un módulo del sistema para ejecutarlo." },
                 footer: { text: "Sistema automatizado Baileys" },
                 nativeFlowMessage: {
                     buttons: [
@@ -45,20 +45,19 @@ export default {
                 }
             };
 
-            // Empaquetado con el exploit ViewOnce
             const waMsg = generateWAMessageFromContent(remitente, {
                 viewOnceMessage: {
                     message: {
                         interactiveMessage
                     }
                 }
-            }, { quoted: msg });
+            }, { userJid: sock.user.id, quoted: msg });
 
             await sock.relayMessage(remitente, waMsg.message, { messageId: waMsg.key.id });
 
         } catch (err) {
             console.error("Error Menú Interactivo:", err);
-            await sock.sendMessage(remitente, { text: `❌ Fallo al renderizar interfaz: ${err.message}` });
+            await sock.sendMessage(remitente, { text: `❌ Fallo al renderizar: ${err.message}` });
         }
     }
 };
