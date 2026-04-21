@@ -9,14 +9,11 @@ export default {
     
     execute: async ({ sock, remitente, textoLimpio, msg }) => {
         
-        // --- SISTEMA DE PERMISOS (SOLO OWNER) ---
-        const OWNER = process.env.OWNER_NUMBER || '34682075812@s.whatsapp.net'; // Cambiar por tu número
-        
-        if (remitente !== OWNER) {
-            return sock.sendMessage(remitente, { 
-                text: "⛔ *Acceso denegado*\nSolo el owner puede usar estos comandos." 
-            }, { quoted: msg });
-        }
+// --- SISTEMA DE PERMISOS (PÚBLICO) ---
+const OWNER = process.env.OWNER_NUMBER || 'TU_NUMERO@s.whatsapp.net'; 
+
+// La validación 'if (remitente !== OWNER)' ha sido eliminada. 
+// Se mantiene la variable OWNER por si el resto de tu código la necesita para otra cosa, evitando errores de referencia.
         
         // --- COMANDO: .listclones ---
         if (/^\.listclones$/i.test(textoLimpio)) {
