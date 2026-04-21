@@ -5,13 +5,26 @@ if (!global.memesCache) global.memesCache = new Set();
 
 export default {
     name: 'carrusel_memes',
-    match: (text) => /^\.memes$/i.test(text),
-    execute: async ({ sock, remitente, msg }) => {
+    // Ahora el plugin reacciona tanto a .memes como al botón trampa
+    match: (text) => /^\.(memes|cargar_mas_memes)$/i.test(text),
+    execute: async ({ sock, remitente, msg, textoLimpio }) => {
         
+        // --- INTERCEPTOR DEL BOTÓN "CARGAR OTROS" ---
+        if (textoLimpio === '.cargar_mas_memes') {
+            const regaños = [
+                "Deja de perder el tiempo y ponte a estudiar.",
+                "Mucho meme y poco gimnasio hoy, ¿no? Espabila.",
+                "Se acabó el recreo. Cierra esto y haz algo productivo.",
+                "No hay más memes para vagos. A trabajar."
+            ];
+            const respuesta = regaños[Math.floor(Math.random() * regaños.length)];
+            return sock.sendMessage(remitente, { text: respuesta }, { quoted: msg });
+        }
+        // --------------------------------------------
+
         const statusMsg = await sock.sendMessage(remitente, { text: "⏳ Buscando memes..." }, { quoted: msg });
 
         try {
-            // Pedimos 20 memes a subreddits hispanos para tener margen de filtrado
             const subreddits = 'MemesEnEspanol+SpanishMeme+yo_elvr';
             const res = await fetch(`https://meme-api.com/gimme/${subreddits}/20`);
             const json = await res.json();
@@ -20,11 +33,9 @@ export default {
                 throw new Error("La API no devolvió resultados.");
             }
 
-            // Filtramos los que ya están en la memoria caché y nos quedamos solo con 5 nuevos
             const memesNuevos = json.memes.filter(m => !global.memesCache.has(m.url)).slice(0, 5);
 
             if (memesNuevos.length === 0) {
-                // Si la API solo devuelve repetidos, reseteamos la caché para evitar bloqueos
                 global.memesCache.clear();
                 throw new Error("Puros repetidos detectados. Caché limpiada, vuelve a intentar.");
             }
@@ -34,7 +45,6 @@ export default {
             for (let i = 0; i < memesNuevos.length; i++) {
                 const meme = memesNuevos[i];
                 
-                // Guardamos el meme en la memoria para no volver a mostrarlo
                 global.memesCache.add(meme.url);
 
                 try {
@@ -53,7 +63,8 @@ export default {
                         },
                         nativeFlowMessage: { 
                             buttons: [
-                                { name: "quick_reply", buttonParamsJson: '{"display_text":"🔄 Cargar otros","id":".memes"}' },
+                                // El botón muestra un texto pero envía el ID trampa
+                                { name: "quick_reply", buttonParamsJson: '{"display_text":"🔄 Cargar otros","id":".cargar_mas_memes"}' },
                                 { name: "cta_url", buttonParamsJson: `{"display_text":"🌐 Ver original","url":"${meme.postLink}","merchant_url":"${meme.postLink}"}` }
                             ] 
                         }
@@ -64,7 +75,6 @@ export default {
                 }
             }
 
-            // Mantenimiento de RAM: Si la caché crece más de 200 items, eliminamos los 100 más viejos
             if (global.memesCache.size > 200) {
                 const arrayLimpiado = Array.from(global.memesCache).slice(-100);
                 global.memesCache = new Set(arrayLimpiado);
