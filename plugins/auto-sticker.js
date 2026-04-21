@@ -49,7 +49,7 @@ const dictionary = {
     // 🧐 Duda / Sospecha / Fuentes
     'fuentes': 'fuentes.webp', 'link': 'fuentes.webp', 'salsa': 'fuentes.webp',
     'sospechoso': 'desconfianza.webp', 'raro': 'desconfianza.webp', 'turbio': 'desconfianza.webp', 'sus': 'desconfianza.webp',
-    'piensa': 'think.webp', 'que': 'think.webp', 'enserio': 'think.webp', 'iq': 'think.webp',
+    'piensa': 'think.webp', 'quizas': 'think.webp', 'enserio': 'think.webp', 'iq': 'think.webp',
     
     // 👀 Observación / Freno
     'jura': 'lookhe.webp', 'look': 'lookhe.webp', 'mira': 'lookhe.webp', 'observa': 'lookhe.webp',
