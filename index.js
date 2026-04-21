@@ -96,12 +96,42 @@ async function iniciarBot() {
         global.db.data = global.db.getState();
 
         const remitente = msg.key.remoteJid;
-        const texto = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
+        
+        // Extracción mejorada de texto - ahora incluye respuestas de botones
+        let texto = msg.message.conversation 
+            || msg.message.extendedTextMessage?.text 
+            || "";
+        
+        // Intentar extraer ID de botón si es una respuesta interactiva
+        let buttonText = "";
+        try {
+            if (msg?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson) {
+                const params = JSON.parse(msg.message.interactiveResponseMessage.nativeFlowResponseMessage.paramsJson);
+                buttonText = params.id || "";
+            }
+        } catch (e) {
+            // Silencioso
+        }
+        
+        // Fallback para otros tipos de botones
+        if (!buttonText) {
+            buttonText = msg?.message?.buttonsResponseMessage?.selectedButtonId 
+                || msg?.message?.listResponseMessage?.singleSelectReply?.selectedRowId
+                || msg?.message?.templateButtonReplyMessage?.selectedId
+                || "";
+        }
+        
+        // Si hay un botón presionado, usar ese texto
+        if (buttonText) {
+            texto = buttonText;
+        }
+        
         const textoLimpio = texto.trim();
         const msgType = Object.keys(msg.message).find(k => ['videoMessage', 'imageMessage', 'documentMessage', 'audioMessage'].includes(k));
         const quoted = msg.message.extendedTextMessage?.contextInfo?.quotedMessage;
 
-        if (!textoLimpio && !msgType) return;
+        // Permitir pasar si hay texto o media o si es un botón
+        if (!textoLimpio && !msgType && !buttonText) return;
 
         // --- LÓGICA DE CONTROL DE GRUPOS ---
         const isGroup = remitente.endsWith('@g.us');
