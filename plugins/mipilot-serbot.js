@@ -1,10 +1,9 @@
 import { default as makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion, DisconnectReason, downloadContentFromMessage } from '@whiskeysockets/baileys';
-import qrcode from 'qrcode';
 import fs from 'fs';
 import path from 'path';
 import { pathToFileURL } from 'url';
 
-// Caché global de plugins para clones: evita saturar la RAM recargando archivos del disco por cada amigo que se conecte
+// Caché global de plugins para clones (optimización de RAM)
 let clonePlugins = null;
 
 export default {
@@ -12,7 +11,7 @@ export default {
     match: (text) => /^\.(botclone|jadibot)$/i.test(text),
     execute: async ({ sock, remitente, msg }) => {
         
-        const statusMsg = await sock.sendMessage(remitente, { text: "⏳ Levantando sub-instancia. Generando código QR..." }, { quoted: msg });
+        const statusMsg = await sock.sendMessage(remitente, { text: "⏳ Levantando sub-instancia. Solicitando QR a Meta..." }, { quoted: msg });
 
         const cloneId = remitente.split('@')[0];
         const clonesDir = path.resolve('./clones');
@@ -20,13 +19,16 @@ export default {
         
         const sessionDir = path.join(clonesDir, `session_${cloneId}`);
 
+        // Si ya hay una sesión, no generamos QR, intentamos reconectar directamente
+        const isSessionExists = fs.existsSync(sessionDir) && fs.readdirSync(sessionDir).length > 0;
+
         const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
         const { version } = await fetchLatestBaileysVersion();
 
         const cloneSock = makeWASocket({
             version,
             auth: state,
-            printQRInTerminal: false,
+            printQRInTerminal: false, // Oculto en terminal principal para no ensuciar tus logs
             browser: ['Ubuntu', 'Chrome', '122.0.0.0'],
             syncFullHistory: false
         });
@@ -36,33 +38,41 @@ export default {
         cloneSock.ev.on('connection.update', async (update) => {
             const { connection, lastDisconnect, qr } = update;
 
+            // Renderizado de QR externalizado vía API (Evita crasheos por dependencias faltantes en VPS)
             if (qr) {
                 try {
-                    const qrBuffer = await qrcode.toBuffer(qr, { scale: 8 });
+                    const qrApiUrl = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodeURIComponent(qr)}`;
                     await sock.sendMessage(remitente, {
-                        image: qrBuffer,
-                        caption: "📲 *ESCANEA ESTE QR*\nAbre WhatsApp en el otro teléfono > Dispositivos vinculados > Vincular un dispositivo.\nEl QR se actualizará automáticamente si caduca."
+                        image: { url: qrApiUrl },
+                        caption: "📲 *NUEVA SESIÓN CREADA*\nAbre WhatsApp en el teléfono secundario > Dispositivos vinculados > Vincular un dispositivo.\n\n_Nota: El código se refrescará si tardas demasiado._"
                     }, { quoted: msg });
-                    await sock.sendMessage(remitente, { delete: statusMsg.key }).catch(()=>{});
+                    
+                    // Borramos el mensaje de espera solo la primera vez
+                    if (statusMsg) await sock.sendMessage(remitente, { delete: statusMsg.key }).catch(()=>{});
                 } catch (e) {
-                    console.error("Error al generar imagen QR:", e);
+                    console.error("[CLON] Error al obtener imagen QR externa:", e);
                 }
             }
 
             if (connection === 'close') {
                 const reason = lastDisconnect?.error?.output?.statusCode;
                 if (reason === DisconnectReason.loggedOut) {
-                    await sock.sendMessage(remitente, { text: "❌ Sesión cerrada desde el móvil. La instancia ha sido destruida. Usa el comando de nuevo para reconectar." });
+                    await sock.sendMessage(remitente, { text: "❌ La sesión del clon fue cerrada desde el dispositivo móvil. Destruyendo datos." });
                     fs.rmSync(sessionDir, { recursive: true, force: true });
-                } else {
-                    console.log(`[CLON ${cloneId}] Desconexión técnica. El sistema intentará reconectar automáticamente.`);
+                } else if (reason === DisconnectReason.connectionClosed) {
+                    console.log(`[CLON ${cloneId}] Conexión cerrada, reconectando...`);
+                } else if (reason === DisconnectReason.timedOut) {
+                    console.log(`[CLON ${cloneId}] Timeout. El QR expiró o la red falló.`);
+                    if (!isSessionExists) {
+                        fs.rmSync(sessionDir, { recursive: true, force: true });
+                        await sock.sendMessage(remitente, { text: "⏳ El QR expiró sin ser escaneado. Vuelve a ejecutar el comando." });
+                    }
                 }
             } else if (connection === 'open') {
-                await sock.sendMessage(remitente, { text: "✅ Conexión establecida. La sub-instancia ya está operando y escuchando comandos." });
+                await sock.sendMessage(remitente, { text: "✅ Sub-instancia conectada y operando. Tu clon ya responde a los comandos." });
             }
         });
 
-        // Carga y mapeo de los mismos plugins que usa la instancia principal
         if (!clonePlugins) {
             const pluginsDir = path.resolve('./plugins');
             const pluginFiles = fs.readdirSync(pluginsDir).filter(file => file.endsWith('.js'));
@@ -87,7 +97,7 @@ export default {
             return null;
         };
 
-        // Motor de escucha para la sub-instancia
+        // Escucha de mensajes del clon
         cloneSock.ev.on('messages.upsert', async (m) => {
             const cloneMsg = m.messages[0];
             if (!cloneMsg.message || cloneMsg.key.remoteJid === 'status@broadcast') return;
@@ -128,7 +138,6 @@ export default {
                 if (plugin.match && plugin.match(textoLimpio, ctx)) {
                     try {
                         await plugin.execute(ctx);
-                        // Sincroniza la DB global para que los datos del clon se guarden
                         global.db.write();
                     } catch (err) {
                         console.error(`Error en clon ${cloneId} plugin ${plugin.name}:`, err);
