@@ -8,7 +8,7 @@ export default {
     match: (text) => /^\.memes$/i.test(text),
     execute: async ({ sock, remitente, msg }) => {
         
-        const statusMsg = await sock.sendMessage(remitente, { text: "⏳ Buscando memes (filtrando repetidos)..." }, { quoted: msg });
+        const statusMsg = await sock.sendMessage(remitente, { text: "⏳ Buscando memes..." }, { quoted: msg });
 
         try {
             // Pedimos 20 memes a subreddits hispanos para tener margen de filtrado
@@ -74,7 +74,7 @@ export default {
 
             const interactiveMessage = {
                 body: { text: "✦ *MEMES ES* ✦\nDesliza para ver más." },
-                footer: { text: "Humor automatizado" },
+                footer: { text: "riete porfa" },
                 carouselMessage: {
                     cards: cards,
                     messageVersion: 1
