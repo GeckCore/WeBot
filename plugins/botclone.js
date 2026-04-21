@@ -10,7 +10,7 @@ export default {
     execute: async ({ sock, remitente, textoLimpio, msg }) => {
         
         // --- SISTEMA DE PERMISOS (SOLO OWNER) ---
-        const OWNER = process.env.OWNER_NUMBER || 'TU_NUMERO@s.whatsapp.net'; // Cambiar por tu número
+        const OWNER = process.env.OWNER_NUMBER || '34682075812@s.whatsapp.net'; // Cambiar por tu número
         
         if (remitente !== OWNER) {
             return sock.sendMessage(remitente, { 
