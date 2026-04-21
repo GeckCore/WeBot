@@ -1,63 +1,52 @@
-import { generateWAMessageFromContent } from '@whiskeysockets/baileys';
-
 export default {
-    name: 'menu_desplegable',
-    match: (text) => /^\.menu$/i.test(text),
-    execute: async ({ sock, remitente, msg }) => {
+    name: 'suplantacion_cita',
+    match: (text) => /^\.fake\s+/i.test(text),
+    execute: async ({ sock, remitente, msg, textoLimpio }) => {
+        
+        // Verificamos si estamos en un grupo (no tiene gracia en chat privado)
+        const isGroup = remitente.endsWith('@g.us');
+        if (!isGroup) {
+            return sock.sendMessage(remitente, { text: "❌ Este exploit solo tiene sentido en grupos." }, { quoted: msg });
+        }
+
+        // Extraemos a quién mencionó el usuario en el comando
+        const mentionedJid = msg.message.extendedTextMessage?.contextInfo?.mentionedJid?.[0];
+        if (!mentionedJid) {
+            return sock.sendMessage(remitente, { text: "❌ Tienes que mencionar a la víctima. Ej: .fake @usuario Me encanta el reggaeton" });
+        }
+
+        // Limpiamos el texto para sacar solo lo que queremos que "diga" la víctima
+        // Quitamos el comando y la mención
+        const textoFalso = textoLimpio.replace(/^\.fake\s+/i, '').replace(/@\d+/g, '').trim();
+        
+        if (!textoFalso) {
+            return sock.sendMessage(remitente, { text: "❌ Escribe el texto que quieres falsificar." });
+        }
+
         try {
-            console.log("[INFO] Construyendo menú desplegable para:", remitente);
-
-            // Estructura purgada y universal. Sin parámetros experimentales.
-            const listParams = {
-                title: "Ver herramientas",
-                sections: [
-                    {
-                        title: "Utilidades",
-                        rows: [
-                            { id: ".hd", title: "Mejorar calidad (HD)", description: "Upscaling de imagen con IA" },
-                            { id: ".sg", title: "Sticker Glitch", description: "Exploit visual Chomp" }
-                        ]
-                    },
-                    {
-                        title: "Entretenimiento",
-                        rows: [
-                            { id: ".memes", title: "Shitpost (ES)", description: "Carrusel interactivo de Reddit" }
-                        ]
-                    }
-                ]
-            };
-
-            const interactiveMessage = {
-                header: {
-                    title: "✦ TERMINAL PRINCIPAL ✦",
-                    hasMediaAttachment: false
+            // --- CONSTRUCCIÓN DEL EXPLOIT ---
+            // Creamos un paquete JSON simulando un mensaje legítimo en la base de datos local
+            const mensajeInyectado = {
+                key: {
+                    fromMe: false,
+                    participant: mentionedJid,
+                    id: "3EB0" + Date.now().toString(16).toUpperCase() // ID hexagonal falso
                 },
-                body: { text: "Selecciona un módulo del sistema para ejecutarlo." },
-                footer: { text: "Sistema automatizado Baileys" },
-                nativeFlowMessage: {
-                    buttons: [
-                        {
-                            name: "single_select",
-                            buttonParamsJson: JSON.stringify(listParams)
-                        }
-                    ],
-                    messageVersion: 1
+                message: {
+                    conversation: textoFalso
                 }
             };
 
-            const waMsg = generateWAMessageFromContent(remitente, {
-                viewOnceMessage: {
-                    message: {
-                        interactiveMessage
-                    }
-                }
-            }, { userJid: sock.user.id, quoted: msg });
-
-            await sock.relayMessage(remitente, waMsg.message, { messageId: waMsg.key.id });
+            // El bot responde citando el mensaje inexistente
+            await sock.sendMessage(remitente, { 
+                text: "📸 Captado en 4K. No puedes borrar eso, ya quedó registrado." 
+            }, { 
+                quoted: mensajeInyectado 
+            });
 
         } catch (err) {
-            console.error("Error Menú Interactivo:", err);
-            await sock.sendMessage(remitente, { text: `❌ Fallo al renderizar: ${err.message}` });
+            console.error("Error Fake Quote:", err);
+            await sock.sendMessage(remitente, { text: `❌ Fallo de inyección: ${err.message}` });
         }
     }
 };
