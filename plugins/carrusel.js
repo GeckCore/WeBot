@@ -1,21 +1,29 @@
 import { generateWAMessageFromContent, prepareWAMessageMedia } from '@whiskeysockets/baileys';
 
-// Sistema de memoria RAM para evitar repetidos (Límite dinámico)
+// Sistema de memoria RAM para evitar repetidos
 if (!global.memesCache) global.memesCache = new Set();
 
 export default {
     name: 'carrusel_memes',
-    // Ahora el plugin reacciona tanto a .memes como al botón trampa
-    match: (text) => /^\.(memes|cargar_mas_memes)$/i.test(text),
+    // Ahora interceptamos tanto texto normal como IDs ocultos de botones
+    match: (text, { msg }) => {
+        const buttonId = msg?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.id || '';
+        const comando = text || buttonId;
+        return /^\.(memes|cargar_mas_memes)$/i.test(comando);
+    },
     execute: async ({ sock, remitente, msg, textoLimpio }) => {
         
-        // --- INTERCEPTOR DEL BOTÓN "CARGAR OTROS" ---
-        if (textoLimpio === '.cargar_mas_memes') {
+        // Extraemos la entrada, venga de donde venga
+        const buttonId = msg?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.id || '';
+        const input = (textoLimpio || buttonId).toLowerCase();
+        
+        // --- INTERCEPTOR DEL BOTÓN TRAMPA ---
+        if (input === '.cargar_mas_memes') {
             const regaños = [
                 "Deja de perder el tiempo y ponte a estudiar.",
-                "Mucho meme y poco gimnasio hoy, ¿no? Espabila.",
+                "Mucho shitpost y poca intensidad hoy. Espabila.",
                 "Se acabó el recreo. Cierra esto y haz algo productivo.",
-                "No hay más memes para vagos. A trabajar."
+                "No hay más memes para vagos. A tirar pesado o a los libros."
             ];
             const respuesta = regaños[Math.floor(Math.random() * regaños.length)];
             return sock.sendMessage(remitente, { text: respuesta }, { quoted: msg });
@@ -63,7 +71,7 @@ export default {
                         },
                         nativeFlowMessage: { 
                             buttons: [
-                                // El botón muestra un texto pero envía el ID trampa
+                                // El ID oculto que WhatsApp enviará al tocar el botón
                                 { name: "quick_reply", buttonParamsJson: '{"display_text":"🔄 Cargar otros","id":".cargar_mas_memes"}' },
                                 { name: "cta_url", buttonParamsJson: `{"display_text":"🌐 Ver original","url":"${meme.postLink}","merchant_url":"${meme.postLink}"}` }
                             ] 
