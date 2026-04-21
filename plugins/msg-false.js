@@ -42,7 +42,7 @@ export default {
 
             // 3. El bot responde con la cita falsa
             await sock.sendMessage(remitente, { 
-                text: "📸 Captado en 4K. No puedes borrar eso, ya quedó registrado." 
+                text: "como?" 
             }, { 
                 quoted: mensajeInyectado 
             });
