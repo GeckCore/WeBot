@@ -1,10 +1,9 @@
 import crypto from 'crypto'
-import fileTypePkg from 'file-type'
+import { fileTypeFromBuffer } from 'file-type'
 import { promises as fsp } from 'fs'
 import path from 'path'
 import { spawn } from 'child_process'
 
-const { fileTypeFromBuffer } = fileTypePkg
 const fetchFn = fetch
 
 export default {
@@ -12,196 +11,125 @@ export default {
   match: (text) => /^\.(hd|enhance|remini)$/i.test(text),
   execute: async ({ sock, remitente, msg, quoted, getMediaInfo, downloadContentFromMessage }) => {
     try {
+      // Determinar si el objetivo es el mensaje citado o el actual
       const targetMsg = quoted ? quoted : msg;
       const mediaInfo = getMediaInfo(targetMsg);
 
       if (!mediaInfo || mediaInfo.type !== 'image') {
-        return sock.sendMessage(remitente, { text: `《✧》 Responde a una *imagen* con el comando.` }, { quoted: msg });
+        return sock.sendMessage(remitente, { text: `《✧》 Responde a una *imagen* con el comando .hd` }, { quoted: msg });
       }
 
       const statusMsg = await sock.sendMessage(remitente, { text: "⏳ Mejorando calidad de la imagen..." }, { quoted: msg });
 
-      // Descarga usando el entorno del bot
+      // Descarga del buffer
       const stream = await downloadContentFromMessage(mediaInfo.msg, mediaInfo.type);
       let buffer = Buffer.from([]);
       for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
 
       if (!buffer || buffer.length < 10) {
-        return sock.sendMessage(remitente, { text: '《✧》 No se pudo descargar la imagen' }, { quoted: msg });
+        return sock.sendMessage(remitente, { text: '《✧》 Error al descargar la imagen.' }, { quoted: msg });
       }
 
-      const ft = await safeFileType(buffer)
-      const inputMime = ft?.mime || 'image/jpeg'
+      // Detección de tipo de archivo corregida
+      const ft = await fileTypeFromBuffer(buffer);
+      const inputMime = ft?.mime || 'image/jpeg';
+      
       if (!/^image\/(jpe?g|png|webp)$/i.test(inputMime)) {
-        return sock.sendMessage(remitente, { text: `《✧》 El formato *${inputMime}* no es compatible` }, { quoted: msg });
+        return sock.sendMessage(remitente, { text: `《✧》 Formato *${inputMime}* no compatible.` }, { quoted: msg });
       }
 
-      const result = await vectorinkEnhanceFromBuffer(buffer, inputMime)
+      const result = await vectorinkEnhanceFromBuffer(buffer, inputMime);
 
       if (!result?.ok || !result?.buffer) {
-        const errorMsg = result?.error?.code || result?.error?.step || result?.error?.message || 'error'
-        return sock.sendMessage(remitente, { text: `《✧》 No se pudo *mejorar* la imagen (${errorMsg})` }, { quoted: msg });
+        const errorMsg = result?.error?.message || 'Error en la API';
+        return sock.sendMessage(remitente, { text: `《✧》 No se pudo mejorar la imagen: ${errorMsg}` }, { quoted: msg });
       }
 
-      await sock.sendMessage(remitente, { image: result.buffer, caption: null }, { quoted: msg });
+      // Enviar resultado y borrar mensaje de espera
+      await sock.sendMessage(remitente, { image: result.buffer, caption: "✅ Imagen mejorada con éxito" }, { quoted: msg });
       await sock.sendMessage(remitente, { delete: statusMsg.key });
 
     } catch (e) {
-      console.error(e)
-      await sock.sendMessage(remitente, { 
-        text: `> An unexpected error occurred while executing command. Please try again or contact support if the issue persists.\n> [Error: *${e?.message || String(e)}*]` 
-      }, { quoted: msg });
+      console.error(e);
+      await sock.sendMessage(remitente, { text: `❌ Error interno: ${e.message}` }, { quoted: msg });
     }
   }
 }
 
-// --- FUNCIONES AUXILIARES INTACTAS ---
-
-async function safeFileType(buf) {
-  try {
-    return await fileTypeFromBuffer(buf)
-  } catch {
-    return null
-  }
-}
-
-async function safeJson(res) {
-  const t = await res.text().catch(() => '')
-  try {
-    return JSON.parse(t)
-  } catch {
-    return { raw: t }
-  }
-}
-
-function extFromMime(mime) {
-  if (/png/i.test(mime)) return 'png'
-  if (/webp/i.test(mime)) return 'webp'
-  return 'jpg'
-}
-
-function runFfmpeg(args, timeoutMs = 60000) {
-  return new Promise((resolve, reject) => {
-    // Forzamos el uso del ffmpeg local de tu VPS
-    const ffmpegPath = path.resolve('./ffmpeg');
-    const p = spawn(ffmpegPath, args, { stdio: ['ignore', 'ignore', 'pipe'] })
-    let err = ''
-    const t = setTimeout(() => {
-      try {
-        p.kill('SIGKILL')
-      } catch {}
-      reject(new Error('ffmpeg timeout'))
-    }, timeoutMs)
-
-    p.stderr.on('data', (d) => (err += d.toString()))
-    p.on('error', (e) => {
-      clearTimeout(t)
-      reject(e)
-    })
-    p.on('close', (code) => {
-      clearTimeout(t)
-      if (code === 0) return resolve(true)
-      reject(new Error(err || `ffmpeg failed (${code})`))
-    })
-  })
-}
-
-async function webpToPngWithFfmpeg(webpBuf, tmpDir) {
-  const inPath = path.join(tmpDir, `vi_${Date.now()}_${Math.random().toString(16).slice(2)}.webp`)
-  const outPath = path.join(tmpDir, `vi_${Date.now()}_${Math.random().toString(16).slice(2)}.png`)
-
-  await fsp.writeFile(inPath, webpBuf)
-
-  try {
-    await runFfmpeg(['-y', '-i', inPath, '-frames:v', '1', outPath], 60000)
-    const png = await fsp.readFile(outPath)
-    return { ok: true, png }
-  } catch (e) {
-    return { ok: false, error: e?.message || String(e) }
-  } finally {
-    try { await fsp.unlink(inPath) } catch {}
-    try { await fsp.unlink(outPath) } catch {}
-  }
-}
+// --- FUNCIONES INTERNAS ---
 
 async function vectorinkEnhanceFromBuffer(inputBuf, inputMime) {
-  const API = 'https://us-central1-vector-ink.cloudfunctions.net/upscaleImage'
-  const ORIGIN = 'https://vectorink.io'
-  const TIMEOUT_MS = 120000
-  const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36'
+  const tmpDir = path.resolve('./tmp');
+  if (!fsp.access(tmpDir).catch(() => false)) await fsp.mkdir(tmpDir, { recursive: true });
 
-  const out = {
-    ok: false,
-    provider: 'vectorink.io',
-    meta: { request_id: crypto.randomUUID?.() || crypto.randomBytes(16).toString('hex') }
-  }
-
-  // Usamos el directorio ./tmp de tu bot en lugar del genérico del SO
-  const tmpDir = path.resolve('./tmp')
-  const tmpPath = path.join(tmpDir, `img_${Date.now()}_${Math.random().toString(16).slice(2)}.${extFromMime(inputMime)}`)
+  const id = Date.now();
+  const tmpPath = path.join(tmpDir, `hd_in_${id}.${inputMime.split('/')[1]}`);
+  
+  const out = { ok: false, buffer: null, error: null };
 
   try {
-    await fsp.mkdir(tmpDir, { recursive: true })
-    await fsp.writeFile(tmpPath, inputBuf)
+    await fsp.writeFile(tmpPath, inputBuf);
+    const b64 = inputBuf.toString('base64');
 
-    const b64 = (await fsp.readFile(tmpPath)).toString('base64')
-
-    const r = await fetchFn(API, {
+    const response = await fetchFn('https://us-central1-vector-ink.cloudfunctions.net/upscaleImage', {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        accept: '*/*',
-        origin: ORIGIN,
-        referer: `${ORIGIN}/`,
-        'user-agent': UA
+        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
       },
-      body: JSON.stringify({ data: { image: b64 } }),
-      signal: AbortSignal.timeout ? AbortSignal.timeout(TIMEOUT_MS) : undefined
-    })
+      body: JSON.stringify({ data: { image: b64 } })
+    });
 
-    const j = await safeJson(r)
-    if (!r.ok) {
-      out.error = { step: 'request', status: r.status, body: j }
-      return out
-    }
+    const json = await response.json().catch(() => ({}));
+    const resultText = json?.result;
+    if (!resultText) throw new Error("La API no devolvió resultados.");
 
-    const innerText = j?.result
-    if (typeof innerText !== 'string' || innerText.length < 10) {
-      out.error = { step: 'parse', code: 'no_result', body: j }
-      return out
-    }
+    const innerJson = JSON.parse(resultText);
+    const webpB64 = innerJson?.image?.b64_json;
+    if (!webpB64) throw new Error("No se encontró la imagen procesada.");
 
-    let inner
-    try {
-      inner = JSON.parse(innerText)
-    } catch {
-      out.error = { step: 'parse', code: 'bad_result_json', body: j }
-      return out
-    }
+    const webpBuf = Buffer.from(webpB64, 'base64');
 
-    const webpB64 = inner?.image?.b64_json
-    if (!webpB64) {
-      out.error = { step: 'parse', code: 'no_b64', body: inner }
-      return out
-    }
+    // Conversión de WebP (API) a PNG (WhatsApp HD) usando ffmpeg local
+    const converted = await webpToPng(webpBuf, tmpDir, id);
+    if (!converted.ok) throw new Error(converted.error);
 
-    const webpBuf = Buffer.from(webpB64, 'base64')
+    out.ok = true;
+    out.buffer = converted.png;
+    return out;
 
-    const conv = await webpToPngWithFfmpeg(webpBuf, tmpDir)
-    if (!conv.ok) {
-      out.error = { step: 'convert', code: 'ffmpeg_failed', message: conv.error }
-      return out
-    }
-
-    out.ok = true
-    out.buffer = conv.png
-    out.contentType = 'image/png'
-    out.result = { image_id: inner?.image?.image_id, created: inner?.created, credits: inner?.credits }
-    return out
   } catch (e) {
-    out.error = { step: 'exception', message: e?.message || String(e) }
-    return out
+    out.error = e;
+    return out;
   } finally {
-    try { await fsp.unlink(tmpPath) } catch {}
+    if (fsp.access(tmpPath).catch(() => false)) await fsp.unlink(tmpPath);
   }
+}
+
+function webpToPng(webpBuf, tmpDir, id) {
+  return new Promise(async (resolve) => {
+    const inPath = path.join(tmpDir, `raw_${id}.webp`);
+    const outPath = path.join(tmpDir, `final_${id}.png`);
+    const ffmpegPath = path.resolve('./ffmpeg');
+
+    await fsp.writeFile(inPath, webpBuf);
+
+    const ff = spawn(ffmpegPath, ['-y', '-i', inPath, outPath]);
+    
+    ff.on('close', async (code) => {
+      try {
+        if (code === 0) {
+          const png = await fsp.readFile(outPath);
+          resolve({ ok: true, png });
+        } else {
+          resolve({ ok: false, error: "Error en la conversión de imagen." });
+        }
+      } catch (e) {
+        resolve({ ok: false, error: e.message });
+      } finally {
+        await fsp.unlink(inPath).catch(() => {});
+        await fsp.unlink(outPath).catch(() => {});
+      }
+    });
+  });
 }
