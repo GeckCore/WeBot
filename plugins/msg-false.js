@@ -10,25 +10,37 @@ export default {
 
         const mentionedJid = msg.message.extendedTextMessage?.contextInfo?.mentionedJid?.[0];
         if (!mentionedJid) {
-            return sock.sendMessage(remitente, { text: "❌ Tienes que mencionar a la víctima. Ej: .fake @usuario texto" });
+            return sock.sendMessage(remitente, { text: "❌ Tienes que mencionar a la víctima. Ej: .fake @usuario texto|reacción" });
         }
 
-        const textoFalso = textoLimpio.replace(/^\.fake\s+/i, '').replace(/@\d+/g, '').trim();
+        // Extraemos todo lo que hay después del comando y la mención
+        const rawInput = textoLimpio.replace(/^\.fake\s+/i, '').replace(/@\d+/g, '').trim();
+        
+        let textoFalso = rawInput;
+        let reaccion = "como?"; // Reacción predeterminada
+
+        // Buscamos el delimitador |
+        const separatorIndex = rawInput.indexOf('|');
+        if (separatorIndex !== -1) {
+            textoFalso = rawInput.slice(0, separatorIndex).trim();
+            const customReaccion = rawInput.slice(separatorIndex + 1).trim();
+            // Si hay algo escrito después del |, sustituye el predeterminado
+            if (customReaccion) reaccion = customReaccion; 
+        }
         
         if (!textoFalso) {
             return sock.sendMessage(remitente, { text: "❌ Escribe el texto que quieres falsificar." });
         }
 
         try {
-            // 1. Borramos el comando del usuario para eliminar la evidencia
-            // Nota: El bot intentará borrarlo. Si no tiene permisos, simplemente lo ignorará y seguirá.
+            // 1. Destrucción de evidencia
             try {
                 await sock.sendMessage(remitente, { delete: msg.key });
             } catch (e) {
                 console.log("[INFO] No se pudo borrar el comando (falta admin).");
             }
 
-            // 2. Construcción del exploit
+            // 2. Construcción del exploit en memoria
             const mensajeInyectado = {
                 key: {
                     fromMe: false,
@@ -40,9 +52,9 @@ export default {
                 }
             };
 
-            // 3. El bot responde con la cita falsa
+            // 3. Ejecución: El bot responde usando la reacción dinámica
             await sock.sendMessage(remitente, { 
-                text: "como?" 
+                text: reaccion 
             }, { 
                 quoted: mensajeInyectado 
             });
