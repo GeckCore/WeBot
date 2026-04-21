@@ -35,7 +35,8 @@ binarios.forEach(bin => {
     }
 });
 
-let plugins = [];
+// Plugins globales (compartidos entre bot principal y clones)
+global.plugins = [];
 
 async function iniciarBot() {
     // --- CARGA DINÁMICA DE PLUGINS ---
@@ -44,7 +45,7 @@ async function iniciarBot() {
     
     const pluginFiles = fs.readdirSync(pluginsDir).filter(file => file.endsWith('.js'));
     
-    plugins = await Promise.all(pluginFiles.map(async (file) => {
+    global.plugins = await Promise.all(pluginFiles.map(async (file) => {
         try {
             const fullPath = path.join(pluginsDir, file);
             const module = await import(pathToFileURL(fullPath).href);
@@ -54,7 +55,7 @@ async function iniciarBot() {
             return null;
         }
     }));
-    plugins = plugins.filter(p => p !== null);
+    global.plugins = global.plugins.filter(p => p !== null);
 
     const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
     const { version } = await fetchLatestBaileysVersion();
@@ -76,7 +77,7 @@ async function iniciarBot() {
             console.log('[INFO] Conexión cerrada. Reconectando...');
             iniciarBot();
         } else if (connection === 'open') {
-            console.log(`[INFO] ¡Conectado! (${plugins.length} plugins cargados)`);
+            console.log(`[INFO] ¡Conectado! (${global.plugins.length} plugins cargados)`);
         }
     });
 
@@ -150,7 +151,7 @@ async function iniciarBot() {
             msgType 
         };
 
-        for (const plugin of plugins) {
+        for (const plugin of global.plugins) {
             if (plugin.match && plugin.match(textoLimpio, ctx)) {
                 try {
                     await plugin.execute(ctx);
