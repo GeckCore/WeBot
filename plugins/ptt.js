@@ -7,13 +7,17 @@ const execPromise = util.promisify(exec);
 
 export default {
     name: 'audio_infinito',
-    match: (text, { quoted, getMediaInfo }) => /^\.ptt$/i.test(text) && quoted && ['audio', 'video'].includes(getMediaInfo(quoted)?.type),
+    // Captura el comando .ptt si hay un audio o video citado
+    match: (text, { quoted, getMediaInfo }) => {
+        const info = getMediaInfo(quoted);
+        return /^\.ptt$/i.test(text) && quoted && (info?.type === 'audio' || info?.type === 'video');
+    },
     execute: async ({ sock, remitente, msg, quoted, getMediaInfo, downloadContentFromMessage }) => {
         
         const mediaInfo = getMediaInfo(quoted);
         if (!mediaInfo) return;
 
-        // Borramos el comando en modo sigilo
+        // Intento de borrar el comando para no dejar rastro del "truco"
         try { await sock.sendMessage(remitente, { delete: msg.key }); } catch (e) {}
 
         const idStr = Date.now().toString();
@@ -24,36 +28,42 @@ export default {
         const outputPath = path.join(tmpDir, `out_${idStr}.ogg`);
 
         try {
+            // Descarga del contenido original
             const stream = await downloadContentFromMessage(mediaInfo.msg, mediaInfo.type);
             let buffer = Buffer.from([]);
             for await(const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
             fs.writeFileSync(inputPath, buffer);
 
             const ffmpegPath = path.resolve('./ffmpeg');
-            // Forzamos el formato estricto de notas de voz de WhatsApp (OGG Opus)
+            
+            // Conversión a formato OGG Opus (Estándar de WhatsApp para PTT)
+            // Se usa un bitrate bajo y compresión máxima para asegurar compatibilidad
             await execPromise(`"${ffmpegPath}" -i "${inputPath}" -c:a libopus -b:a 48K -vbr on -compression_level 10 -frame_duration 20 -application voip "${outputPath}" -y`);
+
+            if (!fs.existsSync(outputPath)) throw new Error("FFmpeg no pudo generar el archivo de salida.");
 
             const audioBuffer = fs.readFileSync(outputPath);
 
-            // Generamos una onda de frecuencia visualmente falsa y caótica
-            const fakeWaveform = new Uint8Array(64);
-            for(let i=0; i<64; i++) {
-                fakeWaveform[i] = Math.floor(Math.random() * 256);
+            // Generación de Waveform caótico (ondas de sonido visuales aleatorias)
+            const fakeWaveform = Buffer.alloc(64);
+            for(let i = 0; i < 64; i++) {
+                fakeWaveform[i] = Math.floor(Math.random() * 255);
             }
 
-            // Inyectamos el exploit en el protocolo crudo
+            // --- ENVÍO DEL EXPLOIT ---
             await sock.sendMessage(remitente, {
                 audio: audioBuffer,
                 mimetype: 'audio/ogg; codecs=opus',
-                ptt: true, // Fuerza a que sea Nota de Voz (micrófono verde)
-                seconds: 999999999, // Duración absurda
-                waveform: fakeWaveform 
-            }, { quoted: quoted });
+                ptt: true, // Lo marca como nota de voz (micrófono verde)
+                seconds: 999999999, // Duración visual infinita
+                waveform: fakeWaveform // Ondas visuales corruptas
+            }, { quoted: msg }); // FIX: Se usa 'msg' para evitar el error de 'fromMe'
 
         } catch (err) {
             console.error("Error PTT Glitch:", err);
-            await sock.sendMessage(remitente, { text: `❌ Fallo de compilación: ${err.message}` });
+            await sock.sendMessage(remitente, { text: `❌ Error en la matriz de audio: ${err.message}` });
         } finally {
+            // Limpieza de archivos temporales para mantener la VPS ligera
             [inputPath, outputPath].forEach(file => {
                 if (fs.existsSync(file)) try { fs.unlinkSync(file); } catch(e) {}
             });
