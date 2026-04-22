@@ -4,23 +4,28 @@ import { exec } from 'child_process';
 import { tmpdir } from 'os';
 
 export default {
-    name: 'audio_effects_universal',
+    name: 'audio_effects',
     match: (text) => /^\.(bass|blown|deep|earrape|fast|fat|nightcore|reverse|robot|slow|smooth|tupai|squirrel|chipmunk)/i.test(text),
-    execute: async ({ sock, remitente, msg, textoLimpio, getMediaInfo, downloadContentFromMessage, quoted }) => {
+    execute: async ({ sock, remitente, msg, textoLimpio, downloadContentFromMessage, quoted }) => {
         
         const command = textoLimpio.split(/\s+/)[0].replace('.', '').toLowerCase();
         
-        // 1. Identificación polimórfica del mensaje
-        // Buscamos en audio, video o documento (siempre que sea audio/mpeg)
-        const m = quoted ? quoted : msg.message;
-        const msgType = Object.keys(m)[0];
-        const mediaData = m[msgType];
+        // Extracción segura y directa del nodo del mensaje
+        const targetMsg = quoted ? quoted.message : msg.message;
+        if (!targetMsg) return;
+
+        const msgType = Object.keys(targetMsg).find(k => ['audioMessage', 'videoMessage', 'documentMessage'].includes(k));
         
+        if (!msgType) {
+            return sock.sendMessage(remitente, { text: "❌ Responde a un audio, video o documento." }, { quoted: msg });
+        }
+
+        const mediaData = targetMsg[msgType];
         const isAudio = /audio/.test(mediaData?.mimetype) || mediaData?.mimetype === 'audio/mpeg';
         const isVideo = /video/.test(mediaData?.mimetype);
 
-        if (!mediaData || (!isAudio && !isVideo)) {
-            return sock.sendMessage(remitente, { text: "❌ El archivo debe ser un audio, video o un MP3 enviado como documento." }, { quoted: msg });
+        if (!isAudio && !isVideo) {
+            return sock.sendMessage(remitente, { text: "❌ El archivo no contiene un formato multimedia tratable." }, { quoted: msg });
         }
 
         const ffmpegPath = process.platform === 'win32' 
@@ -28,11 +33,10 @@ export default {
             : join(process.cwd(), 'ffmpeg');
 
         if (!existsSync(ffmpegPath)) {
-            return sock.sendMessage(remitente, { text: "❌ Binario de FFmpeg no detectado." });
+            return sock.sendMessage(remitente, { text: "❌ Binario de FFmpeg no detectado en el directorio raíz." });
         }
 
-        // Configuración de filtros (se mantiene igual)
-        let set;
+        let set = '';
         if (/bass/.test(command)) set = '-af equalizer=f=94:width_type=o:width=2:g=30';
         if (/blown/.test(command)) set = '-af acrusher=.1:1:64:0:log';
         if (/deep/.test(command)) set = '-af atempo=4/4,asetrate=44500*2/3';
@@ -46,28 +50,27 @@ export default {
         if (/smooth/.test(command)) set = '-af "aresample=44100"';
         if (/tupai|squirrel|chipmunk/.test(command)) set = '-filter:a "atempo=0.5,asetrate=65100"';
 
+        // Archivos de E/S. La salida DEBE ser .ogg para notas de voz.
         const tempInput = join(tmpdir(), `in_${Date.now()}`);
-        const tempOutput = join(tmpdir(), `out_${Date.now()}.mp3`);
+        const tempOutput = join(tmpdir(), `out_${Date.now()}.ogg`); 
 
         try {
-            // 2. Descarga usando el tipo de mensaje detectado dinámicamente
-            // Esto evita la corrupción del búfer al usar el parser correcto
             const stream = await downloadContentFromMessage(mediaData, msgType.replace('Message', ''));
             let buffer = Buffer.from([]);
             for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
             writeFileSync(tempInput, buffer);
 
-            // 3. Transcodificación a MP3 reproducible
-            exec(`"${ffmpegPath}" -i ${tempInput} ${set} -c:a libmp3lame -ar 44100 -ac 1 -b:a 128k ${tempOutput}`, async (err) => {
+            // Conversión nativa a OPUS. ar=48000 es la frecuencia estándar de WhatsApp.
+            exec(`"${ffmpegPath}" -i "${tempInput}" ${set} -c:a libopus -ar 48000 -ac 1 -b:a 64k "${tempOutput}"`, async (err) => {
                 if (err) {
-                    console.error(err);
-                    return sock.sendMessage(remitente, { text: "❌ Error en la conversión de FFmpeg." });
+                    console.error("Error FFmpeg:", err);
+                    return sock.sendMessage(remitente, { text: "❌ Fallo en la codificación de FFmpeg." });
                 }
 
                 const finalBuffer = readFileSync(tempOutput);
                 await sock.sendMessage(remitente, { 
                     audio: finalBuffer, 
-                    mimetype: 'audio/mpeg', 
+                    mimetype: 'audio/ogg; codecs=opus', // Tipo MIME estricto requerido por Meta
                     ptt: true 
                 }, { quoted: msg });
 
@@ -75,8 +78,8 @@ export default {
             });
 
         } catch (e) {
-            console.error(e);
-            sock.sendMessage(remitente, { text: `❌ Error: ${e.message}` });
+            console.error("Audio Plugin Error:", e);
+            sock.sendMessage(remitente, { text: `❌ Error de buffer: ${e.message}` });
         }
     }
 };
