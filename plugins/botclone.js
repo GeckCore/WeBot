@@ -13,11 +13,7 @@ export default {
         // --- SISTEMA DE PERMISOS (SOLO OWNER) ---
         const OWNER = process.env.OWNER_NUMBER || '34682075812@s.whatsapp.net'; // Cambiar por tu número
         
-        if (remitente !== OWNER) {
-            return sock.sendMessage(remitente, { 
-                text: "⛔ *Acceso denegado*\nSolo el owner puede usar estos comandos." 
-            }, { quoted: msg });
-        }
+
         
         // --- COMANDO: .listclones ---
         if (/^\.listclones$/i.test(textoLimpio)) {
