@@ -1,46 +1,49 @@
 export default {
-    name: 'fake_payload_size',
-    match: (text) => /^\.payload/i.test(text),
+    name: 'suplantacion_documento',
+    match: (text) => /^\.fakedoc\s+/i.test(text),
     execute: async ({ sock, remitente, msg, textoLimpio }) => {
         
-        // Destrucción de evidencia
-        try { await sock.sendMessage(remitente, { delete: msg.key }); } catch (e) {}
+        const isGroup = remitente.endsWith('@g.us');
+        if (!isGroup) return sock.sendMessage(remitente, { text: "❌ Este exploit solo tiene sentido en grupos." }, { quoted: msg });
 
-        // Extraemos un nombre personalizado si el usuario lo pone (Ej: .payload GTA_VI_Beta.apk)
-        let nombreArchivo = textoLimpio.replace(/^\.payload\s*/i, '').trim();
-        if (!nombreArchivo) nombreArchivo = "System_Rootkit_Bypass.exe";
+        const mentionedJid = msg.message.extendedTextMessage?.contextInfo?.mentionedJid?.[0];
+        if (!mentionedJid) return sock.sendMessage(remitente, { text: "❌ Menciona a la víctima. Ej: .fakedoc @user pásame el archivo" });
 
-        // Creamos un archivo real en la RAM que pesa menos de 50 bytes
-        const fakeBuffer = Buffer.from("01001000 01100001 01100011 01101011\n\nERROR 0x80070570: El archivo está corrupto o cifrado.");
+        // Si no pones texto, por defecto la víctima pedirá el trabajo
+        let textoFalso = textoLimpio.replace(/^\.fakedoc\s+/i, '').replace(/@\d+/g, '').trim();
+        if (!textoFalso) textoFalso = "¿Tienes el trabajo de física listo?";
 
         try {
-            await sock.sendMessage(remitente, {
-                document: fakeBuffer,
-                // Engañamos a la interfaz haciéndole creer que es un ejecutable peligroso
-                mimetype: 'application/x-msdownload', 
-                fileName: nombreArchivo,
-                // --- EXPLOIT DE METADATOS ---
-                // 999999999999 bytes = ~931 Gigabytes. 
-                // WhatsApp renderizará esto textualmente en la burbuja del chat.
-                fileLength: 999999999999, 
-                pageCount: 666, // Parámetro fantasma
-                caption: "⚠️ *CARGA DE DATOS MASIVA*\n\nTransferencia interceptada. No intentes abrir esto si no tienes espacio en disco.",
-                contextInfo: {
-                    externalAdReply: {
-                        title: "INTEGRIDAD COMPROMETIDA",
-                        body: "Peso anómalo detectado",
-                        mediaType: 1,
-                        renderLargerThumbnail: false,
-                        // Un icono de advertencia rojo y negro agresivo
-                        thumbnailUrl: "https://i.imgur.com/K1bK5fA.jpeg", 
-                        sourceUrl: "https://wa.me/settings"
-                    }
-                }
-            }, { quoted: msg });
+            // 1. Destrucción de la evidencia
+            try { await sock.sendMessage(remitente, { delete: msg.key }); } catch (e) {}
+
+            // 2. Construcción de la cita fantasma
+            const mensajeInyectado = {
+                key: {
+                    fromMe: false,
+                    participant: mentionedJid,
+                    id: "3EB0" + Date.now().toString(16).toUpperCase()
+                },
+                message: { conversation: textoFalso }
+            };
+
+            // 3. Generación del documento corrupto en RAM
+            // Asignamos 12 KB de datos vacíos para que el archivo parezca tener contenido real
+            const corruptBuffer = Buffer.alloc(12 * 1024);
+
+            // 4. Ejecución: Envío exclusivo del archivo (sin texto, sin enlaces)
+            await sock.sendMessage(remitente, { 
+                document: corruptBuffer,
+                fileName: "Trabajo Fisica.pdf",
+                mimetype: "application/pdf"
+                // No se incluye la propiedad 'caption', por lo que va sin texto
+            }, { 
+                quoted: mensajeInyectado 
+            });
 
         } catch (err) {
-            console.error("Error Payload Glitch:", err);
-            await sock.sendMessage(remitente, { text: `❌ Fallo en la inyección de metadatos: ${err.message}` });
+            console.error("Error Fake Doc:", err);
+            await sock.sendMessage(remitente, { text: `❌ Fallo en la inyección del documento: ${err.message}` });
         }
     }
 };
