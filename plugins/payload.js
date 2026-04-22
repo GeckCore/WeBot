@@ -46,7 +46,7 @@ export default {
 
             // 5. Spoofing de metadatos (1 TB = 1099511627776 bytes y 9999 páginas)
             media.documentMessage.fileLength = "1099511627776"; 
-            media.documentMessage.pageCount = 9999; 
+            media.documentMessage.pageCount = 67; 
 
             // 6. Empaquetado final y ejecución
             const waMsg = generateWAMessageFromContent(remitente, {
