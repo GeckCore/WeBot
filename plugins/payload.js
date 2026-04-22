@@ -15,7 +15,7 @@ export default {
         let textoFalso = textoLimpio.replace(/^\.fakedoc\s+/i, '').replace(/@\d+/g, '').trim();
         
         // Si el usuario olvida poner texto, entra el predeterminado
-        if (!textoFalso) textoFalso = "¿Tienes el trabajo de física listo?";
+        if (!textoFalso) textoFalso = "Pasenme el trabajo";
 
         try {
             // 1. Destrucción de la evidencia (sigilo)
