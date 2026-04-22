@@ -4,7 +4,7 @@ import { exec } from 'child_process';
 import { tmpdir } from 'os';
 
 export default {
-    name: 'audio_effects',
+    name: 'audio_effects_mp3',
     match: (text) => /^\.(bass|blown|deep|earrape|fast|fat|nightcore|reverse|robot|slow|smooth|tupai|squirrel|chipmunk)/i.test(text),
     execute: async ({ sock, remitente, msg, textoLimpio, getMediaInfo, downloadContentFromMessage, quoted }) => {
         
@@ -12,16 +12,16 @@ export default {
         const info = getMediaInfo(msg.message) || getMediaInfo(quoted);
 
         if (!info || !/audio/.test(info.type)) {
-            return sock.sendMessage(remitente, { text: "❌ Responde a un audio o nota de voz para aplicar el efecto." }, { quoted: msg });
+            return sock.sendMessage(remitente, { text: "❌ Responde a un audio para aplicar el efecto." }, { quoted: msg });
         }
 
-        // Definición de la ruta al ejecutable en la carpeta principal
+        // Localización del binario local
         const ffmpegPath = process.platform === 'win32' 
             ? join(process.cwd(), 'ffmpeg.exe') 
             : join(process.cwd(), 'ffmpeg');
 
         if (!existsSync(ffmpegPath)) {
-            return sock.sendMessage(remitente, { text: `❌ No se encontró el binario de FFmpeg en: ${ffmpegPath}` });
+            return sock.sendMessage(remitente, { text: "❌ No se encontró el binario de FFmpeg." });
         }
 
         let set;
@@ -35,11 +35,11 @@ export default {
         if (/reverse/.test(command)) set = '-filter_complex "areverse"';
         if (/robot/.test(command)) set = "-filter_complex \"afftfilt=real='hypot(re,im)*sin(0)':imag='hypot(re,im)*cos(0)':win_size=512:overlap=0.75\"";
         if (/slow/.test(command)) set = '-filter:a "atempo=0.7,asetrate=44100"';
-        if (/smooth/.test(command)) set = '-filter:v "minterpolate=\'mi_mode=mci:mc_mode=aobmc:vsbmc=1:fps=120\'"';
+        if (/smooth/.test(command)) set = '-af "aresample=44100"'; // Corrección de filtro de video a audio
         if (/tupai|squirrel|chipmunk/.test(command)) set = '-filter:a "atempo=0.5,asetrate=65100"';
 
-        const tempInput = join(tmpdir(), `input_${Date.now()}.mp3`);
-        const tempOutput = join(tmpdir(), `output_${Date.now()}.mp3`);
+        const tempInput = join(tmpdir(), `in_${Date.now()}.mp3`);
+        const tempOutput = join(tmpdir(), `out_${Date.now()}.mp3`);
 
         try {
             const stream = await downloadContentFromMessage(info.msg, info.type);
@@ -47,20 +47,22 @@ export default {
             for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
             writeFileSync(tempInput, buffer);
 
-            // Uso de la ruta absoluta al binario local
-            exec(`"${ffmpegPath}" -i ${tempInput} ${set} ${tempOutput}`, async (err) => {
+            // EXPLOIT DE COMPATIBILIDAD:
+            // Forzamos códec mp3 lame, frecuencia estándar y un solo canal para asegurar reproducción en Android/iOS
+            exec(`"${ffmpegPath}" -i ${tempInput} ${set} -c:a libmp3lame -ar 44100 -ac 1 -b:a 128k ${tempOutput}`, async (err) => {
                 if (err) {
                     console.error("FFmpeg Error:", err);
-                    return sock.sendMessage(remitente, { text: "❌ Error crítico al procesar el audio." });
+                    return sock.sendMessage(remitente, { text: "❌ Error al codificar el MP3." });
                 }
 
                 const finalBuffer = readFileSync(tempOutput);
                 await sock.sendMessage(remitente, { 
                     audio: finalBuffer, 
-                    mimetype: 'audio/mp4', 
+                    mimetype: 'audio/mpeg', // Cambiado a mimetype oficial de MP3
                     ptt: true 
                 }, { quoted: msg });
 
+                // Limpieza absoluta de temporales
                 try { unlinkSync(tempInput); unlinkSync(tempOutput); } catch (e) {}
             });
 
