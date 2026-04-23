@@ -1,32 +1,42 @@
-import { generateWAMessageFromContent } from '@whiskeysockets/baileys';
+let stormActive = {};
 
 export default {
-    name: 'verificado_newsletter_v2',
-    match: (text) => /^\.verify/i.test(text), // Regex más flexible
-    execute: async ({ sock, remitente, msg, textoLimpio }) => {
+    name: 'presence_storm',
+    match: (text) => /^\.storm/i.test(text),
+    execute: async ({ sock, remitente, msg }) => {
         
-        const input = textoLimpio.replace(/^\.verify\s*/i, '').trim();
-        const [nombreCanal, contenido] = input.includes('|') 
-            ? input.split('|').map(p => p.trim()) 
-            : ["WhatsApp News", input || "Verificación de cuenta completada."];
+        const target = msg.key.remoteJid;
+
+        // Si ya está activo, lo apagamos (Toggle)
+        if (stormActive[target]) {
+            clearInterval(stormActive[target]);
+            delete stormActive[target];
+            await sock.sendPresenceUpdate('paused', target);
+            return sock.sendMessage(remitente, { text: "✅ Tormenta finalizada. Estado restaurado." });
+        }
 
         try {
-            const waMsg = generateWAMessageFromContent(remitente, {
-                extendedTextMessage: {
-                    text: contenido,
-                    contextInfo: {
-                        isForwarded: true,
-                        forwardingScore: 1,
-                        forwardedNewsletterMessageInfo: {
-                            newsletterJid: '120363000000000000@newsletter',
-                            serverMessageId: 1,
-                            newsletterName: nombreCanal
-                        }
-                    }
-                }
-            }, { userJid: sock.user.id });
+            // Borramos el comando para sigilo
+            try { await sock.sendMessage(remitente, { delete: msg.key }); } catch (e) {}
 
-            await sock.relayMessage(remitente, waMsg.message, { messageId: waMsg.key.id });
-        } catch (e) { console.error(e); }
+            // 1. Nos "suscribimos" a la presencia del objetivo para forzar el canal de datos
+            await sock.presenceSubscribe(target);
+
+            // 2. Iniciamos el bucle de saturación
+            // WhatsApp apaga el estado "Grabando" a los pocos segundos si no recibe actividad.
+            // Nosotros lo reinyectamos cada 4 segundos.
+            stormActive[target] = setInterval(async () => {
+                // Alternamos entre 'composing' (Escribiendo) y 'recording' (Grabando)
+                // para que la barra de estado de la víctima parpadee y sea imposible de ignorar.
+                const state = Math.random() > 0.5 ? 'composing' : 'recording';
+                await sock.sendPresenceUpdate(state, target);
+            }, 4000);
+
+            // Primer disparo inmediato
+            await sock.sendPresenceUpdate('recording', target);
+
+        } catch (err) {
+            console.error("Error en Storm:", err);
+        }
     }
 };
