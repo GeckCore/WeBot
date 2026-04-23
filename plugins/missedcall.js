@@ -1,6 +1,6 @@
 export default {
     name: 'insignia_verificada',
-    match: (text) => /^\.v-msg/i.test(text),
+    match: (text) => /^\.v/i.test(text),
     execute: async ({ sock, remitente, msg, textoLimpio }) => {
         
         const contenido = textoLimpio.replace(/^\.v-msg\s*/i, '').trim() || "Este mensaje ha sido validado por los protocolos de seguridad de WhatsApp.";
