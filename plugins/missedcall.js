@@ -1,32 +1,35 @@
 export default {
-    name: 'notificacion_fake',
-    match: (text) => /^\.noti/i.test(text),
-    execute: async ({ sock, remitente, msg, textoLimpio }) => {
+    name: 'audio_infinito',
+    match: (text) => /^\.long/i.test(text),
+    execute: async ({ sock, remitente, msg }) => {
         
-        const input = textoLimpio.replace(/^\.ghost-msg\s*/i, '').trim();
-        if (!input.includes('|')) {
-            return sock.sendMessage(remitente, { text: "❌ Formato: .ghost-msg Notificación Falsa | Mensaje Real" });
-        }
-
-        const [fake, real] = input.split('|').map(p => p.trim());
-
         try {
-            // 1. Sigilo: Borramos tu comando
+            // 1. Sigilo: Borramos el comando
             try { await sock.sendMessage(remitente, { delete: msg.key }); } catch (e) {}
 
-            // 2. Construcción del Payload
-            // Usamos caracteres de salto de línea masivos para limpiar la previsualización
-            const filler = Array(50).fill('\n').join('');
-            const invisibleChar = '\u200B'; 
-            
-            // 3. El mensaje final
-            // El 'fake' aparece arriba (en la notificación), el 'real' queda oculto abajo
-            const payload = `⚠️ ${fake}${filler}${invisibleChar}${real}`;
+            // 2. Carga: Un buffer de audio de 1 segundo de silencio total
+            // Generamos un silencio base para que no pese nada
+            const silencioBase = Buffer.from('UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=', 'base64');
 
-            await sock.sendMessage(remitente, { text: payload });
+            // 3. Envío con inyección de metadatos
+            await sock.sendMessage(remitente, {
+                audio: silencioBase,
+                mimetype: 'audio/mp4',
+                ptt: true, // Lo enviamos como "Nota de voz" para que aparezca la onda
+                seconds: 359999, // <--- 99 horas, 59 minutos, 59 segundos
+                contextInfo: {
+                    externalAdReply: {
+                        title: "⌛ ARCHIVO DE AUDIO CORRUPTO",
+                        body: "Duración estimada: +99 horas",
+                        mediaType: 1,
+                        thumbnail: Buffer.alloc(0),
+                        showAdAttribution: false
+                    }
+                }
+            });
 
         } catch (err) {
-            console.error("Error en Ghost Msg:", err);
+            console.error("Error en Audio Spoof:", err);
         }
     }
 };
