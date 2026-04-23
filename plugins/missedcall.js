@@ -1,49 +1,38 @@
 export default {
-    name: 'ghost_reaction_spam',
-    match: (text) => /^\.vibrador/i.test(text),
-    execute: async ({ sock, remitente, msg, quoted }) => {
+    name: 'bombardeo_push',
+    match: (text) => /^\.ghost/i.test(text),
+    execute: async ({ sock, remitente, msg }) => {
         
-        if (!quoted) {
-            return sock.sendMessage(remitente, { text: "❌ Responde al mensaje objetivo." }, { quoted: msg });
-        }
-
         try {
-            // Sigilo
+            // 1. Sigilo: Borramos tu comando de ejecución
             try { await sock.sendMessage(remitente, { delete: msg.key }); } catch (e) {}
 
-            // RECONSTRUCCIÓN MANUAL DE LA KEY (El parche para el TypeError)
-            // Aseguramos de forma estricta que el remoteJid no sea nulo.
-            const targetKey = {
-                remoteJid: remitente,
-                fromMe: quoted.key?.fromMe || false,
-                id: quoted.key?.id || quoted.id,
-                participant: quoted.key?.participant || quoted.participant || remitente
-            };
-
-            const iteraciones = 10;
-            const delay = (ms) => new Promise(res => setTimeout(res, ms));
-            const emojis = ['⚠️', '🔥', '💀', '👀', '⚡', '👁️'];
+            // Configuración de la carga
+            const iteraciones = 15; // 15 notificaciones seguidas (Riesgo bajo de ban, alta molestia)
+            const invisible = '\u200E'; // Marca direccional Unicode (Ancho cero)
 
             for (let i = 0; i < iteraciones; i++) {
-                const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];
-
-                // Inyección de reacción con la key reconstruida
-                await sock.sendMessage(remitente, { 
-                    react: { text: randomEmoji, key: targetKey } 
+                
+                // 2. Disparo: El servidor emite la notificación Push al hardware del objetivo
+                const fantasma = await sock.sendMessage(remitente, { 
+                    text: invisible 
                 });
 
-                await delay(300); 
+                // 3. Intercepción y destrucción
+                // Revocamos el mensaje antes de que la víctima tenga tiempo físico de abrir la app.
+                if (fantasma) {
+                    await sock.sendMessage(remitente, { delete: fantasma.key });
+                }
 
-                // Retiro de reacción
-                await sock.sendMessage(remitente, { 
-                    react: { text: '', key: targetKey } 
-                });
-
-                await delay(200); 
+                // 4. Evasión del Firewall de Meta (Rate Limit)
+                // Usamos un delay asimétrico (entre 400ms y 900ms) para que el servidor 
+                // no detecte un patrón de script automatizado y nos lance un Error 479.
+                const delay = Math.floor(Math.random() * (900 - 400 + 1) + 400);
+                await new Promise(r => setTimeout(r, delay));
             }
 
         } catch (err) {
-            console.error("Falla en bucle háptico:", err);
+            console.error("Falla en saturación Push:", err);
         }
     }
 };
