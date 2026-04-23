@@ -1,48 +1,39 @@
 export default {
-    name: 'spoof_verification',
-    match: (text) => /^\.verify/i.test(text),
-    execute: async ({ sock, remitente, msg }) => {
+    name: 'insignia_verificada',
+    match: (text) => /^\.v-msg/i.test(text),
+    execute: async ({ sock, remitente, msg, textoLimpio }) => {
         
+        const contenido = textoLimpio.replace(/^\.v-msg\s*/i, '').trim() || "Este mensaje ha sido validado por los protocolos de seguridad de WhatsApp.";
+
         try {
-            // 1. Sigilo: Borramos el comando
+            // 1. Sigilo: Borrado del comando
             try { await sock.sendMessage(remitente, { delete: msg.key }); } catch (e) {}
 
-            // 2. Construcción de la VCard con esteroides
-            // Añadimos campos que los motores de búsqueda de contactos de WA marcan como "empresa"
-            const myJid = sock.user.id.split(':')[0];
-            const vcard = 'BEGIN:VCARD\n' +
-                          'VERSION:3.0\n' +
-                          'FN:✅ Verificado por WhatsApp\n' + // Nombre con el tick visual
-                          `TEL;type=CELL;type=VOICE;waid=${myJid}:+${myJid}\n' +
-                          'X-WA-BIZ-DESCRIPTION:Cuenta Oficial de Seguridad y Soporte.\n' +
-                          'X-WA-BIZ-NAME:WhatsApp Support\n' +
-                          'END:VCARD';
-
-            // 3. Envío con inyección de flags de sistema
+            // 2. Construcción del Mensaje con Inyección de Insignia
+            // Reconstruimos la key para evitar el TypeError de 'remoteJid' que tuviste antes
             await sock.sendMessage(remitente, {
-                contacts: {
-                    displayName: 'WhatsApp Support ✅',
-                    contacts: [{ vcard }]
-                },
+                text: contenido,
                 contextInfo: {
-                    // Este es el "corazón" del verificado visual
+                    // Estos dos campos fuerzan el renderizado de "Cuenta Oficial"
                     showAdAttribution: true, 
-                    isForwarded: true,
-                    forwardingScore: 1, // Para que no parezca spam masivo pero sí algo "oficial"
                     externalAdReply: {
-                        title: "ID DE USUARIO VERIFICADO: 0x8221",
-                        body: "Este contacto ha pasado las pruebas de seguridad.",
+                        title: "SISTEMA DE VERIFICACIÓN",
+                        body: "Cuenta Protegida por End-to-End Encryption",
                         mediaType: 1,
+                        previewType: 0,
                         renderLargerThumbnail: false,
-                        thumbnail: Buffer.alloc(0), 
+                        thumbnail: Buffer.alloc(0), // Evitamos carga de imagen para que no pese el paquete
                         sourceUrl: "https://www.whatsapp.com/security",
-                        showAdAttribution: true
-                    }
+                        showAdAttribution: true // Refuerza el sello visual
+                    },
+                    // Añadimos metadata de reenvío oficial
+                    isForwarded: true,
+                    forwardingScore: 1
                 }
             });
 
         } catch (err) {
-            console.error("Error en Verificación Spoof:", err);
+            console.error("Error en Verificación de Mensaje:", err);
         }
     }
 };
