@@ -1,71 +1,46 @@
-import { generateMessageID } from '@whiskeysockets/baileys';
-
 export default {
-    name: 'ring_glitch',
-    match: (text) => /^\.ring/i.test(text),
-    execute: async ({ sock, remitente, msg }) => {
+    name: 'ghost_reaction_spam',
+    match: (text) => /^\.vibrador/i.test(text),
+    execute: async ({ sock, remitente, msg, quoted }) => {
         
-        // Bloqueo de seguridad: Las llamadas directas no funcionan en grupos
-        if (remitente.endsWith('@g.us')) {
-            return sock.sendMessage(remitente, { text: "❌ Ejecución denegada. Este protocolo solo afecta a terminales individuales (chats privados)." }, { quoted: msg });
+        // 1. Verificación estricta: Necesitamos un mensaje de la víctima para reaccionar
+        if (!quoted) {
+            return sock.sendMessage(remitente, { text: "❌ Debes responder al mensaje de la persona a la que quieres saturar." }, { quoted: msg });
         }
 
         try {
-            // Sigilo total: destruimos el comando
+            // 2. Sigilo: Borramos tu comando
             try { await sock.sendMessage(remitente, { delete: msg.key }); } catch (e) {}
 
-            // Cantidad de ciclos de saturación (5 timbrazos fantasma)
-            const loops = 5;
-            const myJid = sock.user.id.split(':')[0] + '@s.whatsapp.net';
+            // 3. Configuración del ataque
+            const iteraciones = 10; // 10 vibraciones (ajústalo según quieras, no pases de 20 para no saturar tu propio socket)
+            const delay = (ms) => new Promise(res => setTimeout(res, ms));
+            
+            // Emojis aleatorios para evitar filtros de spam por repetición
+            const emojis = ['⚠️', '🔥', '💀', '👀', '⚡', '👁️'];
 
-            for (let i = 0; i < loops; i++) {
-                // Generamos un ID de llamada único para cada ciclo
-                const callId = generateMessageID().substring(0, 16);
+            // 4. Bucle de inyección
+            for (let i = 0; i < iteraciones; i++) {
+                
+                const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];
 
-                // 1. INYECCIÓN DE OFERTA: Despierta la pantalla y hace vibrar el móvil
-                await sock.query({
-                    tag: 'call',
-                    attrs: {
-                        to: remitente,
-                        id: generateMessageID()
-                    },
-                    content: [{
-                        tag: 'offer',
-                        attrs: {
-                            'call-id': callId,
-                            'call-creator': myJid
-                        },
-                        content: [{ tag: 'audio', attrs: {} }] // Especificamos que es llamada de voz
-                    }]
+                // ENVIAR REACCIÓN -> Provoca la vibración / sonido
+                await sock.sendMessage(remitente, { 
+                    react: { text: randomEmoji, key: quoted.key } 
                 });
 
-                // Mantenemos el teléfono sonando exactamente 1.5 segundos
-                // Es el tiempo perfecto para molestar sin dar tiempo a contestar
-                await new Promise(resolve => setTimeout(resolve, 1500));
+                await delay(300); // Pausa exacta para que el sistema Android/iOS procese la vibración
 
-                // 2. INYECCIÓN DE CORTE: Corta la llamada de golpe
-                await sock.query({
-                    tag: 'call',
-                    attrs: {
-                        to: remitente,
-                        id: generateMessageID()
-                    },
-                    content: [{
-                        tag: 'terminate',
-                        attrs: {
-                            'call-id': callId,
-                            'call-creator': myJid,
-                            reason: 'timeout'
-                        }
-                    }]
+                // ELIMINAR REACCIÓN -> Borra la notificación de la pantalla
+                await sock.sendMessage(remitente, { 
+                    react: { text: '', key: quoted.key } 
                 });
 
-                // Pausa corta antes de volver a saturar el procesador de la app
-                await new Promise(resolve => setTimeout(resolve, 800));
+                await delay(200); // Pausa de enfriamiento del socket
             }
 
         } catch (err) {
-            console.error("Error en Call Glitch:", err);
+            console.error("Error en Ghost React:", err);
         }
     }
 };
