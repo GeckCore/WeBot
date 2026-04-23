@@ -1,6 +1,6 @@
 export default {
     name: 'notificacion_fake',
-    match: (text) => /^\.ghost-msg/i.test(text),
+    match: (text) => /^\.noti/i.test(text),
     execute: async ({ sock, remitente, msg, textoLimpio }) => {
         
         const input = textoLimpio.replace(/^\.ghost-msg\s*/i, '').trim();
