@@ -1,42 +1,56 @@
 let stormActive = {};
 
 export default {
-    name: 'presence_storm',
+    name: 'presence_storm_v2',
     match: (text) => /^\.storm/i.test(text),
     execute: async ({ sock, remitente, msg }) => {
-        
         const target = msg.key.remoteJid;
 
-        // Si ya está activo, lo apagamos (Toggle)
+        // Lógica de Toggle: Si ya está activo, lo apaga manualmente y sale.
         if (stormActive[target]) {
-            clearInterval(stormActive[target]);
+            clearInterval(stormActive[target].interval);
+            clearTimeout(stormActive[target].timeout);
             delete stormActive[target];
             await sock.sendPresenceUpdate('paused', target);
-            return sock.sendMessage(remitente, { text: "✅ Tormenta finalizada. Estado restaurado." });
+            return; 
         }
 
         try {
-            // Borramos el comando para sigilo
+            // 1. Destrucción del comando para no dejar rastro
             try { await sock.sendMessage(remitente, { delete: msg.key }); } catch (e) {}
 
-            // 1. Nos "suscribimos" a la presencia del objetivo para forzar el canal de datos
+            // 2. Cálculo de duración aleatoria (10 a 30 minutos)
+            const minMs = 10 * 60 * 1000;
+            const maxMs = 30 * 60 * 1000;
+            const randomDuration = Math.floor(Math.random() * (maxMs - minMs + 1) + minMs);
+
+            // 3. Suscripción al canal de presencia
             await sock.presenceSubscribe(target);
 
-            // 2. Iniciamos el bucle de saturación
-            // WhatsApp apaga el estado "Grabando" a los pocos segundos si no recibe actividad.
-            // Nosotros lo reinyectamos cada 4 segundos.
-            stormActive[target] = setInterval(async () => {
-                // Alternamos entre 'composing' (Escribiendo) y 'recording' (Grabando)
-                // para que la barra de estado de la víctima parpadee y sea imposible de ignorar.
+            // 4. Inicio del bucle de saturación (Cada 4 segundos)
+            const interval = setInterval(async () => {
                 const state = Math.random() > 0.5 ? 'composing' : 'recording';
                 await sock.sendPresenceUpdate(state, target);
             }, 4000);
 
-            // Primer disparo inmediato
+            // 5. Configuración del auto-apagado silencioso
+            const timeout = setTimeout(async () => {
+                if (stormActive[target]) {
+                    clearInterval(stormActive[target].interval);
+                    delete stormActive[target];
+                    await sock.sendPresenceUpdate('paused', target);
+                    // No envía mensaje, desaparece sin más.
+                }
+            }, randomDuration);
+
+            // Guardamos las referencias en memoria
+            stormActive[target] = { interval, timeout };
+
+            // Disparo inicial para que la víctima lo vea al instante
             await sock.sendPresenceUpdate('recording', target);
 
         } catch (err) {
-            console.error("Error en Storm:", err);
+            console.error("Falla en el protocolo de presencia:", err);
         }
     }
 };
