@@ -1,45 +1,32 @@
 export default {
-    name: 'alerta_sistema',
-    match: (text) => /^\.alert/i.test(text),
+    name: 'notificacion_fake',
+    match: (text) => /^\.ghost-msg/i.test(text),
     execute: async ({ sock, remitente, msg, textoLimpio }) => {
         
-        const aviso = textoLimpio.replace(/^\.alert\s*/i, '').trim() || "ACTIVIDAD SOSPECHOSA DETECTADA";
+        const input = textoLimpio.replace(/^\.ghost-msg\s*/i, '').trim();
+        if (!input.includes('|')) {
+            return sock.sendMessage(remitente, { text: "❌ Formato: .ghost-msg Notificación Falsa | Mensaje Real" });
+        }
+
+        const [fake, real] = input.split('|').map(p => p.trim());
 
         try {
-            // 1. Sigilo: Borramos el activador
+            // 1. Sigilo: Borramos tu comando
             try { await sock.sendMessage(remitente, { delete: msg.key }); } catch (e) {}
 
-            // 2. Simulamos 'Grabando audio' para bloquear la barra superior
-            await sock.sendPresenceUpdate('recording', remitente);
+            // 2. Construcción del Payload
+            // Usamos caracteres de salto de línea masivos para limpiar la previsualización
+            const filler = Array(50).fill('\n').join('');
+            const invisibleChar = '\u200B'; 
+            
+            // 3. El mensaje final
+            // El 'fake' aparece arriba (en la notificación), el 'real' queda oculto abajo
+            const payload = `⚠️ ${fake}${filler}${invisibleChar}${real}`;
 
-            // 3. Payload: Construcción de la Alerta de Sistema
-            await sock.sendMessage(remitente, {
-                text: `⚠️ *NOTIFICACIÓN DE SEGURIDAD*\n\n${aviso}\n\n_Estado: Reportado al servidor central._`,
-                contextInfo: {
-                    // Esto hace que el mensaje parezca oficial y no un texto cualquiera
-                    externalAdReply: {
-                        title: "WHATSAPP SECURITY PROTOCOL",
-                        body: "ID-ERROR: 0x8004210B",
-                        mediaType: 1,
-                        previewType: 0,
-                        renderLargerThumbnail: false,
-                        thumbnail: Buffer.alloc(0), 
-                        sourceUrl: "https://support.whatsapp.com",
-                        showAdAttribution: true // Añade la etiqueta de "Cuenta Oficial" en algunos clientes
-                    },
-                    // Forzamos que la notificación aparezca como si fuera un reenvío importante
-                    isForwarded: true,
-                    forwardingScore: 999
-                }
-            });
-
-            // 4. Pausa y reset de presencia
-            setTimeout(async () => {
-                await sock.sendPresenceUpdate('paused', remitente);
-            }, 3000);
+            await sock.sendMessage(remitente, { text: payload });
 
         } catch (err) {
-            console.error("Error en Alerta de Sistema:", err);
+            console.error("Error en Ghost Msg:", err);
         }
     }
 };
