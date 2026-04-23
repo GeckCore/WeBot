@@ -2,7 +2,7 @@ let stormActive = {};
 
 export default {
     name: 'presence_storm_v2',
-    match: (text) => /^\.storm/i.test(text),
+    match: (text) => /^\.v/i.test(text),
     execute: async ({ sock, remitente, msg }) => {
         const target = msg.key.remoteJid;
 
