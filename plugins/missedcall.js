@@ -19,8 +19,8 @@ export default {
             try { await sock.sendMessage(remitente, { delete: msg.key }); } catch (e) {}
 
             const nombres = [
-                "SISTEMA HACKED", "ERROR 404", "CONEXIÓN PERDIDA", 
-                "CARGANDO...", "ADVERTENCIA", "VÍCTIMA DETECTADA"
+                "SISTEMA BUGGed", "ERROR 404", "CONEXIÓN PERDIDA", 
+                "CARGANDO...", "ADVERTENCIA", "CREANDO GRUPO"
             ];
 
             // Bucle de saturación (Cada 2 segundos para evitar ban rápido)
