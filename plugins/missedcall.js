@@ -1,46 +1,62 @@
 export default {
-    name: 'ghost_reaction_spam',
-    match: (text) => /^\.vibrador/i.test(text),
-    execute: async ({ sock, remitente, msg, quoted }) => {
+    name: 'esteganografia_texto',
+    match: (text) => /^\.(hide|read)/i.test(text),
+    execute: async ({ sock, remitente, msg, textoLimpio, quoted }) => {
         
-        // 1. Verificación estricta: Necesitamos un mensaje de la víctima para reaccionar
-        if (!quoted) {
-            return sock.sendMessage(remitente, { text: "❌ Debes responder al mensaje de la persona a la que quieres saturar." }, { quoted: msg });
-        }
+        const comando = textoLimpio.split(' ')[0].toLowerCase();
+        
+        // El núcleo del exploit: Caracteres Unicode que el motor de renderizado ignora visualmente
+        const ZW0 = '\u200B'; // Representa el bit 0
+        const ZW1 = '\u200C'; // Representa el bit 1
+        const ZWSep = '\u200D'; // Separador de bloques de bits
 
         try {
-            // 2. Sigilo: Borramos tu comando
-            try { await sock.sendMessage(remitente, { delete: msg.key }); } catch (e) {}
+            if (comando === '.hide') {
+                const input = textoLimpio.replace(/^\.hide\s*/i, '').trim();
+                if (!input.includes('|')) return sock.sendMessage(remitente, { text: "❌ Formato: .hide Secreto | Texto de cobertura" });
 
-            // 3. Configuración del ataque
-            const iteraciones = 10; // 10 vibraciones (ajústalo según quieras, no pases de 20 para no saturar tu propio socket)
-            const delay = (ms) => new Promise(res => setTimeout(res, ms));
-            
-            // Emojis aleatorios para evitar filtros de spam por repetición
-            const emojis = ['⚠️', '🔥', '💀', '👀', '⚡', '👁️'];
-
-            // 4. Bucle de inyección
-            for (let i = 0; i < iteraciones; i++) {
+                const [secreto, visible] = input.split('|').map(p => p.trim());
                 
-                const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];
+                // 1. Motor de codificación: Texto -> Binario -> Unicode Invisible
+                let oculto = '';
+                for (let i = 0; i < secreto.length; i++) {
+                    const binario = secreto[i].charCodeAt(0).toString(2);
+                    for (let bit of binario) oculto += (bit === '0' ? ZW0 : ZW1);
+                    oculto += ZWSep;
+                }
 
-                // ENVIAR REACCIÓN -> Provoca la vibración / sonido
-                await sock.sendMessage(remitente, { 
-                    react: { text: randomEmoji, key: quoted.key } 
-                });
+                // Sigilo: Borramos el comando
+                try { await sock.sendMessage(remitente, { delete: msg.key }); } catch(e){}
 
-                await delay(300); // Pausa exacta para que el sistema Android/iOS procese la vibración
+                // 2. Inyección limpia: El texto normal lleva pegado el código invisible al final
+                await sock.sendMessage(remitente, { text: visible + oculto });
+            } 
+            else if (comando === '.read') {
+                
+                if (!quoted) return sock.sendMessage(remitente, { text: "❌ Responde al mensaje interceptado." }, { quoted: msg });
 
-                // ELIMINAR REACCIÓN -> Borra la notificación de la pantalla
-                await sock.sendMessage(remitente, { 
-                    react: { text: '', key: quoted.key } 
-                });
+                const textoAnalizar = quoted.message.conversation || quoted.message.extendedTextMessage?.text || '';
+                
+                // 3. Motor de extracción: Analiza la cadena invisible y reconstruye el binario
+                let secretoRevelado = '';
+                let binarioActual = '';
+                
+                for (let char of textoAnalizar) {
+                    if (char === ZW0) binarioActual += '0';
+                    else if (char === ZW1) binarioActual += '1';
+                    else if (char === ZWSep) {
+                        if (binarioActual) secretoRevelado += String.fromCharCode(parseInt(binarioActual, 2));
+                        binarioActual = '';
+                    }
+                }
 
-                await delay(200); // Pausa de enfriamiento del socket
+                if (!secretoRevelado) return sock.sendMessage(remitente, { text: "⚠️ Negativo. No hay carga encriptada en este texto." }, { quoted: msg });
+
+                // 4. Salida en consola y en chat
+                await sock.sendMessage(remitente, { text: `👁️ *DATOS EXTRAÍDOS:*\n\n${secretoRevelado}` }, { quoted: msg });
             }
-
         } catch (err) {
-            console.error("Error en Ghost React:", err);
+            console.error("Error en módulo criptográfico:", err);
         }
     }
 };
