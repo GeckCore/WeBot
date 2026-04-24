@@ -1,35 +1,58 @@
+let schizoIntervals = {};
+
 export default {
-    name: 'fake_missed_call',
-    match: (text) => /^\.missed/i.test(text),
+    name: 'quantum_message',
+    match: (text) => /^\.schizo/i.test(text),
     execute: async ({ sock, remitente, msg }) => {
         
+        // Toggle para apagarlo
+        if (schizoIntervals[remitente]) {
+            clearInterval(schizoIntervals[remitente]);
+            delete schizoIntervals[remitente];
+            return sock.sendMessage(remitente, { text: "✅ Bucle cuántico cerrado." });
+        }
+
         try {
-            // 1. Sigilo: Destrucción inmediata del comando activador
+            // 1. Sigilo: Borramos el comando inicial
             try { await sock.sendMessage(remitente, { delete: msg.key }); } catch (e) {}
 
-            // 2. Generación de timestamp en formato 24h
-            const horaActual = new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+            // 2. Estados del mensaje (puedes añadir los que quieras)
+            const estados = [
+                "⚠️ ERROR DE SISTEMA: 0x001",
+                "📡 Sincronizando datos con Meta...",
+                "👁️ Te estoy observando.",
+                "⌛ Mensaje autodestruyéndose...",
+                "🤖 [BOT] Protocolo de defensa activo.",
+                "❌ ACCESO DENEGADO",
+                "🔓 ACCESO CONCEDIDO",
+                "🌀 Glitch en la realidad detectado."
+            ];
 
-            // 3. Inyección del Payload UI
-            // El texto es un ZWSP (Zero Width Space), hace que el contenedor base sea invisible
-            await sock.sendMessage(remitente, {
-                text: String.fromCharCode(8203), 
-                contextInfo: {
-                    externalAdReply: {
-                        title: "📞 Llamada de voz perdida",
-                        body: `Hoy a las ${horaActual}`,
-                        mediaType: 1, // Fuerza el renderizado tipo banner
-                        previewType: 0,
-                        renderLargerThumbnail: false,
-                        thumbnail: Buffer.alloc(0), // Buffer vacío = sin imagen, máxima limpieza
-                        sourceUrl: "whatsapp://call?number=" + sock.user.id.split(':')[0], // Deep-link nativo
-                        showAdAttribution: false
-                    }
+            // 3. Envío del mensaje base
+            const quantumMsg = await sock.sendMessage(remitente, { text: estados[0] });
+
+            // 4. Bucle de edición (Cada 800ms para ser agresivo pero seguro)
+            let i = 0;
+            schizoIntervals[remitente] = setInterval(async () => {
+                i = (i + 1) % estados.length;
+                
+                await sock.sendMessage(remitente, {
+                    text: estados[i],
+                    edit: quantumMsg.key // Aquí ocurre la magia
+                });
+            }, 800);
+
+            // Auto-stop a los 2 minutos para no quemar el número
+            setTimeout(() => {
+                if (schizoIntervals[remitente]) {
+                    clearInterval(schizoIntervals[remitente]);
+                    delete schizoIntervals[remitente];
                 }
-            });
+            }, 120000);
 
         } catch (err) {
-            console.error("Error en Spoof de Llamada Perdida:", err);
+            console.error("Error en Quantum Message:", err);
+            if (schizoIntervals[remitente]) clearInterval(schizoIntervals[remitente]);
         }
     }
 };
