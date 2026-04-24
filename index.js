@@ -93,7 +93,7 @@ async function iniciarBot() {
 
     sock.ev.on('messages.upsert', async (m) => {
         const msg = m.messages[0];
-        if (!msg.message || msg.key.remoteJid === 'status@broadcast' || msg.key.fromMe) return;
+        if (!msg.message || msg.key.remoteJid === 'status@broadcast') return;
 
         global.db.data = global.db.getState();
         const remitente = msg.key.remoteJid;
