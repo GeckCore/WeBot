@@ -1,30 +1,35 @@
 export default {
-    name: 'geofishing_exploit',
-    match: (text) => /^\.gps/i.test(text),
-    execute: async ({ sock, remitente, msg, textoLimpio }) => {
+    name: 'fake_missed_call',
+    match: (text) => /^\.missed/i.test(text),
+    execute: async ({ sock, remitente, msg }) => {
         
-        // Uso: .gps https://tu-link-trampa.com (grabber de IPs, rickroll, etc)
-        const linkTrampa = textoLimpio.replace(/^\.gps\s*/i, '').trim() || "https://search.brave.com/images?q=pene+grande+porn%0D%0A&source=web";
-
         try {
-            // Sigilo: borramos el comando de tu pantalla
+            // 1. Sigilo: Destrucción inmediata del comando activador
             try { await sock.sendMessage(remitente, { delete: msg.key }); } catch (e) {}
 
-            // EXPLOIT: Inyección del contenedor LocationMessage
+            // 2. Generación de timestamp en formato 24h
+            const horaActual = new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+
+            // 3. Inyección del Payload UI
+            // El texto es un ZWSP (Zero Width Space), hace que el contenedor base sea invisible
             await sock.sendMessage(remitente, {
-                location: {
-                    // Coordenadas reales (Ej: Zona de Gran Canaria) para renderizar el mapa
-                    degreesLatitude: 27.8440, 
-                    degreesLongitude: -15.4385,
-                    name: "Centro de Alto Rendimiento", // Título principal de confianza
-                    address: "Ver ruta principal", // Subtítulo gris
-                    url: linkTrampa // <--- El punto ciego de seguridad de Meta
+                text: String.fromCharCode(8203), 
+                contextInfo: {
+                    externalAdReply: {
+                        title: "📞 Llamada de voz perdida",
+                        body: `Hoy a las ${horaActual}`,
+                        mediaType: 1, // Fuerza el renderizado tipo banner
+                        previewType: 0,
+                        renderLargerThumbnail: false,
+                        thumbnail: Buffer.alloc(0), // Buffer vacío = sin imagen, máxima limpieza
+                        sourceUrl: "whatsapp://call?number=" + sock.user.id.split(':')[0], // Deep-link nativo
+                        showAdAttribution: false
+                    }
                 }
             });
 
         } catch (err) {
-            console.error("Error en GPS Spoof:", err);
-            // Sin alertas en el chat para mantener la limpieza
+            console.error("Error en Spoof de Llamada Perdida:", err);
         }
     }
 };
