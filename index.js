@@ -19,7 +19,6 @@ global.db.defaults({
 
 console.log('[INFO] Base de datos JSON cargada y lista.');
 
-// Variables de estado global
 global.espejosActivos = {}; 
 global.plugins = [];
 
@@ -31,16 +30,11 @@ binarios.forEach(bin => {
     const fileName = isWindows ? `${bin}.exe` : bin;
     const binPath = path.join(__dirname, fileName);
     if (fs.existsSync(binPath) && !isWindows) {
-        try { 
-            fs.chmodSync(binPath, '755'); 
-        } catch (e) {
-            console.error(`[ERROR] No se pudo dar permisos a ${fileName}`);
-        }
+        try { fs.chmodSync(binPath, '755'); } catch (e) {}
     }
 });
 
 async function iniciarBot() {
-    // --- CARGA DINÁMICA DE PLUGINS ---
     const pluginsDir = path.join(__dirname, 'plugins');
     if (!fs.existsSync(pluginsDir)) fs.mkdirSync(pluginsDir);
     
@@ -95,10 +89,6 @@ async function iniciarBot() {
         const msg = m.messages[0];
         if (!msg.message || msg.key.remoteJid === 'status@broadcast') return;
 
-        global.db.data = global.db.getState();
-        const remitente = msg.key.remoteJid;
-        
-        // Extracción de texto
         let texto = msg.message.conversation 
             || msg.message.extendedTextMessage?.text 
             || "";
@@ -117,22 +107,19 @@ async function iniciarBot() {
                 || msg?.message?.templateButtonReplyMessage?.selectedId
                 || "";
         }
-        
         if (buttonText) texto = buttonText;
         const textoLimpio = texto.trim();
 
         // ==========================================
-        //        INTERCEPTOR MODO ESPEJO
+        // SEGURO ANTI-BUCLE (FILTRO DE ORIGEN)
+        // Si el mensaje lo enviaste tú y NO es un comando, lo ignora.
+        // Esto corta el bucle infinito del clon.
         // ==========================================
-        if (global.espejosActivos[remitente] && textoLimpio) {
-            await sock.sendPresenceUpdate('composing', remitente);
-            await new Promise(r => setTimeout(r, 1000)); // Delay de realismo
-            await sock.sendMessage(remitente, { text: textoLimpio });
-            await sock.sendPresenceUpdate('paused', remitente);
-            return; // Detiene la ejecución para que no se activen otros plugins
-        }
-        // ==========================================
+        if (msg.key.fromMe && !textoLimpio.startsWith('.')) return;
 
+        global.db.data = global.db.getState();
+        const remitente = msg.key.remoteJid;
+        
         const msgType = Object.keys(msg.message).find(k => ['videoMessage', 'imageMessage', 'documentMessage', 'audioMessage'].includes(k));
         const quoted = msg.message.extendedTextMessage?.contextInfo?.quotedMessage;
 
@@ -144,14 +131,7 @@ async function iniciarBot() {
         if (isGroup && settings.grupos === false && !/^\.grupo\s+on$/i.test(textoLimpio)) return;
 
         const ctx = { 
-            sock, 
-            msg, 
-            remitente, 
-            textoLimpio, 
-            getMediaInfo, 
-            downloadContentFromMessage, 
-            quoted, 
-            msgType 
+            sock, msg, remitente, textoLimpio, getMediaInfo, downloadContentFromMessage, quoted, msgType 
         };
 
         for (const plugin of global.plugins) {
