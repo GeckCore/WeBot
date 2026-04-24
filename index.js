@@ -19,6 +19,10 @@ global.db.defaults({
 
 console.log('[INFO] Base de datos JSON cargada y lista.');
 
+// Variables de estado global
+global.espejosActivos = {}; 
+global.plugins = [];
+
 // --- OPTIMIZACIÓN DE ARRANQUE: BINARIOS ---
 const isWindows = process.platform === 'win32';
 const binarios = ['yt-dlp', 'ffmpeg', 'webpmux']; 
@@ -34,9 +38,6 @@ binarios.forEach(bin => {
         }
     }
 });
-
-// Plugins globales (compartidos entre bot principal y clones)
-global.plugins = [];
 
 async function iniciarBot() {
     // --- CARGA DINÁMICA DE PLUGINS ---
@@ -92,29 +93,24 @@ async function iniciarBot() {
 
     sock.ev.on('messages.upsert', async (m) => {
         const msg = m.messages[0];
-        if (!msg.message || msg.key.remoteJid === 'status@broadcast') return;
+        if (!msg.message || msg.key.remoteJid === 'status@broadcast' || msg.key.fromMe) return;
 
         global.db.data = global.db.getState();
-
         const remitente = msg.key.remoteJid;
         
-        // Extracción mejorada de texto - ahora incluye respuestas de botones
+        // Extracción de texto
         let texto = msg.message.conversation 
             || msg.message.extendedTextMessage?.text 
             || "";
         
-        // Intentar extraer ID de botón si es una respuesta interactiva
         let buttonText = "";
         try {
             if (msg?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson) {
                 const params = JSON.parse(msg.message.interactiveResponseMessage.nativeFlowResponseMessage.paramsJson);
                 buttonText = params.id || "";
             }
-        } catch (e) {
-            // Silencioso
-        }
+        } catch (e) {}
         
-        // Fallback para otros tipos de botones
         if (!buttonText) {
             buttonText = msg?.message?.buttonsResponseMessage?.selectedButtonId 
                 || msg?.message?.listResponseMessage?.singleSelectReply?.selectedRowId
@@ -122,19 +118,26 @@ async function iniciarBot() {
                 || "";
         }
         
-        // Si hay un botón presionado, usar ese texto
-        if (buttonText) {
-            texto = buttonText;
-        }
-        
+        if (buttonText) texto = buttonText;
         const textoLimpio = texto.trim();
+
+        // ==========================================
+        //        INTERCEPTOR MODO ESPEJO
+        // ==========================================
+        if (global.espejosActivos[remitente] && textoLimpio) {
+            await sock.sendPresenceUpdate('composing', remitente);
+            await new Promise(r => setTimeout(r, 1000)); // Delay de realismo
+            await sock.sendMessage(remitente, { text: textoLimpio });
+            await sock.sendPresenceUpdate('paused', remitente);
+            return; // Detiene la ejecución para que no se activen otros plugins
+        }
+        // ==========================================
+
         const msgType = Object.keys(msg.message).find(k => ['videoMessage', 'imageMessage', 'documentMessage', 'audioMessage'].includes(k));
         const quoted = msg.message.extendedTextMessage?.contextInfo?.quotedMessage;
 
-        // Permitir pasar si hay texto o media o si es un botón
         if (!textoLimpio && !msgType && !buttonText) return;
 
-        // --- LÓGICA DE CONTROL DE GRUPOS ---
         const isGroup = remitente.endsWith('@g.us');
         const settings = global.db.data.settings;
 
