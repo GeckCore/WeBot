@@ -1,58 +1,108 @@
 import axios from 'axios';
 
-// Creamos un registro global para saber a quién estamos clonando
+// Estado global para saber a quién estamos reflejando
 global.espejosActivos = global.espejosActivos || {};
 
 export default {
-    name: 'clon_absoluto',
-    match: (text) => /^\.clon/i.test(text),
-    execute: async ({ sock, remitente, msg }) => {
-        
-        // Toggle: Si ya está activo, lo apagamos
-        if (global.espejosActivos[remitente]) {
-            delete global.espejosActivos[remitente];
-            return sock.sendMessage(remitente, { text: "✅ Protocolo Espejo desactivado. (Nota: Tu perfil no vuelve a la normalidad automáticamente, debes cambiarlo tú)." });
+    name: 'clon_absoluto_v2',
+    
+    // El match detecta tu comando O intercepta si la víctima habla
+    match: (text, ctx) => {
+        if (global.espejosActivos && global.espejosActivos[ctx.remitente]) return true;
+        return /^\.clon/i.test(text);
+    },
+    
+    execute: async (ctx) => {
+        const { sock, msg, remitente, textoLimpio, quoted } = ctx;
+        global.espejosActivos = global.espejosActivos || {};
+
+        // ==========================================
+        // 1. MODO INTERCEPTOR (Devuelve TODO: Audio, Video, Foto)
+        // ==========================================
+        if (global.espejosActivos[remitente] && !/^\.clon/i.test(textoLimpio)) {
+            if (msg.key.fromMe) return; // Evita bucle infinito contigo mismo
+
+            try {
+                await sock.sendPresenceUpdate('recording', remitente);
+                await new Promise(r => setTimeout(r, 1200)); // Delay humano
+
+                // Clonamos la estructura completa del mensaje en bruto
+                let contenido = JSON.parse(JSON.stringify(msg.message));
+                let msgType = Object.keys(contenido)[0];
+
+                // Borramos los metadatos que generan la etiqueta "Reenviado"
+                if (contenido[msgType]?.contextInfo) {
+                    delete contenido[msgType].contextInfo.isForwarded;
+                    delete contenido[msgType].contextInfo.forwardingScore;
+                }
+
+                // Generamos un ID falso para engañar al sistema de deduplicación
+                const nuevoId = '3EB0' + Math.random().toString(36).toUpperCase().substring(0, 18);
+                
+                // Reenviamos el payload puro (soporta cualquier formato nativo)
+                await sock.relayMessage(remitente, contenido, { messageId: nuevoId });
+                
+                await sock.sendPresenceUpdate('paused', remitente);
+            } catch (e) {
+                console.error("Error al devolver multimedia:", e);
+            }
+            return; // Cortamos ejecución
         }
 
+        // ==========================================
+        // 2. LÓGICA DE ACTIVACIÓN (SOLO POR TI)
+        // ==========================================
+        
+        let objetivo = null;
+        if (quoted) {
+            objetivo = msg.message.extendedTextMessage.contextInfo.participant;
+        } else if (msg.message?.extendedTextMessage?.contextInfo?.mentionedJid?.length > 0) {
+            objetivo = msg.message.extendedTextMessage.contextInfo.mentionedJid[0];
+        } else {
+            objetivo = remitente; // Uso directo en chat privado
+        }
+
+        // Toggle: Apagado
+        if (global.espejosActivos[objetivo]) {
+            delete global.espejosActivos[objetivo];
+            return sock.sendMessage(remitente, { text: "✅ Protocolo Espejo desactivado." });
+        }
+
+        // Encendido y Extracción
         try {
-            // Sigilo
             try { await sock.sendMessage(remitente, { delete: msg.key }); } catch (e) {}
 
-            await sock.sendMessage(remitente, { text: "🔄 Extrayendo metadatos del objetivo..." });
-
-            // 1. Extraer Status (Info)
-            const info = await sock.fetchStatus(remitente).catch(() => ({ status: "Hey there! I am using WhatsApp." }));
-            
-            // 2. Extraer Nombre
-            const nombreVictima = msg.pushName || "Usuario";
-
-            // 3. Extraer y aplicar Foto de Perfil
-            let ppUrl;
+            let estadoText = "Hey there! I am using WhatsApp.";
             try {
-                ppUrl = await sock.profilePictureUrl(remitente, 'image');
-                if (ppUrl) {
-                    const response = await axios.get(ppUrl, { responseType: 'arraybuffer' });
-                    await sock.updateProfilePicture(sock.user.id, Buffer.from(response.data));
-                }
+                const info = await sock.fetchStatus(objetivo);
+                if (info && info.status) estadoText = info.status;
             } catch (e) {
-                console.log("No se pudo obtener la foto de perfil (privacidad o sin foto).");
+                console.log("Estado privado. Usando default.");
             }
 
-            // 4. Aplicar Nombre e Info al Bot
-            try { await sock.updateProfileName(nombreVictima); } catch(e) { console.log("Error al cambiar nombre"); }
-            try { await sock.updateProfileStatus(info.status); } catch(e) { console.log("Error al cambiar info"); }
+            let bufferFp = null;
+            try {
+                const ppUrl = await sock.profilePictureUrl(objetivo, 'image');
+                if (ppUrl) {
+                    const response = await axios.get(ppUrl, { responseType: 'arraybuffer' });
+                    bufferFp = Buffer.from(response.data);
+                    await sock.updateProfilePicture(sock.user.id, bufferFp);
+                }
+            } catch (e) {
+                console.log("Foto de perfil bloqueada por privacidad. Se omite el cambio visual.");
+            }
 
-            // 5. Activar el Modo Espejo para este chat
-            global.espejosActivos[remitente] = true;
+            try { await sock.updateProfileStatus(estadoText); } catch (e) {}
 
-            // 6. Mensaje de impacto
-            await sock.sendMessage(remitente, {
-                text: `⚠️ *ALERTA DE SEGURIDAD*\n\nSe ha detectado un inicio de sesión duplicado para este perfil.\n\n*Estado:* ${info.status}\n*Dispositivo clónico activado.*\n\n_Intercepción de mensajes activada._`,
+            // Activamos el target
+            global.espejosActivos[objetivo] = true;
+
+            await sock.sendMessage(remitente, { 
+                text: `✅ *CLONACIÓN ACTIVA*\n\nObjetivo fijado: ${objetivo.split('@')[0]}\nExtracción visual: ${bufferFp ? 'Exitosa' : 'Denegada (Privacidad)'}\n\n_Todos los audios, stickers y mensajes serán reflejados automáticamente._` 
             });
 
         } catch (err) {
             console.error("Falla crítica en clonación:", err);
-            sock.sendMessage(remitente, { text: "❌ Error al ejecutar clonación. Revisa la consola." });
         }
     }
 };
