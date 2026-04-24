@@ -19,9 +19,6 @@ global.db.defaults({
 
 console.log('[INFO] Base de datos JSON cargada y lista.');
 
-global.espejosActivos = {}; 
-global.plugins = [];
-
 // --- OPTIMIZACIÓN DE ARRANQUE: BINARIOS ---
 const isWindows = process.platform === 'win32';
 const binarios = ['yt-dlp', 'ffmpeg', 'webpmux']; 
@@ -30,11 +27,19 @@ binarios.forEach(bin => {
     const fileName = isWindows ? `${bin}.exe` : bin;
     const binPath = path.join(__dirname, fileName);
     if (fs.existsSync(binPath) && !isWindows) {
-        try { fs.chmodSync(binPath, '755'); } catch (e) {}
+        try { 
+            fs.chmodSync(binPath, '755'); 
+        } catch (e) {
+            console.error(`[ERROR] No se pudo dar permisos a ${fileName}`);
+        }
     }
 });
 
+// Plugins globales (compartidos entre bot principal y clones)
+global.plugins = [];
+
 async function iniciarBot() {
+    // --- CARGA DINÁMICA DE PLUGINS ---
     const pluginsDir = path.join(__dirname, 'plugins');
     if (!fs.existsSync(pluginsDir)) fs.mkdirSync(pluginsDir);
     
@@ -89,49 +94,61 @@ async function iniciarBot() {
         const msg = m.messages[0];
         if (!msg.message || msg.key.remoteJid === 'status@broadcast') return;
 
+        global.db.data = global.db.getState();
+
+        const remitente = msg.key.remoteJid;
+        
+        // Extracción mejorada de texto - ahora incluye respuestas de botones
         let texto = msg.message.conversation 
             || msg.message.extendedTextMessage?.text 
             || "";
         
+        // Intentar extraer ID de botón si es una respuesta interactiva
         let buttonText = "";
         try {
             if (msg?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson) {
                 const params = JSON.parse(msg.message.interactiveResponseMessage.nativeFlowResponseMessage.paramsJson);
                 buttonText = params.id || "";
             }
-        } catch (e) {}
+        } catch (e) {
+            // Silencioso
+        }
         
+        // Fallback para otros tipos de botones
         if (!buttonText) {
             buttonText = msg?.message?.buttonsResponseMessage?.selectedButtonId 
                 || msg?.message?.listResponseMessage?.singleSelectReply?.selectedRowId
                 || msg?.message?.templateButtonReplyMessage?.selectedId
                 || "";
         }
-        if (buttonText) texto = buttonText;
-        const textoLimpio = texto.trim();
-
-        // ==========================================
-        // SEGURO ANTI-BUCLE (FILTRO DE ORIGEN)
-        // Si el mensaje lo enviaste tú y NO es un comando, lo ignora.
-        // Esto corta el bucle infinito del clon.
-        // ==========================================
-        if (msg.key.fromMe && !textoLimpio.startsWith('.')) return;
-
-        global.db.data = global.db.getState();
-        const remitente = msg.key.remoteJid;
         
+        // Si hay un botón presionado, usar ese texto
+        if (buttonText) {
+            texto = buttonText;
+        }
+        
+        const textoLimpio = texto.trim();
         const msgType = Object.keys(msg.message).find(k => ['videoMessage', 'imageMessage', 'documentMessage', 'audioMessage'].includes(k));
         const quoted = msg.message.extendedTextMessage?.contextInfo?.quotedMessage;
 
+        // Permitir pasar si hay texto o media o si es un botón
         if (!textoLimpio && !msgType && !buttonText) return;
 
+        // --- LÓGICA DE CONTROL DE GRUPOS ---
         const isGroup = remitente.endsWith('@g.us');
         const settings = global.db.data.settings;
 
         if (isGroup && settings.grupos === false && !/^\.grupo\s+on$/i.test(textoLimpio)) return;
 
         const ctx = { 
-            sock, msg, remitente, textoLimpio, getMediaInfo, downloadContentFromMessage, quoted, msgType 
+            sock, 
+            msg, 
+            remitente, 
+            textoLimpio, 
+            getMediaInfo, 
+            downloadContentFromMessage, 
+            quoted, 
+            msgType 
         };
 
         for (const plugin of global.plugins) {
