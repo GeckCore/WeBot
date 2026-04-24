@@ -18,15 +18,13 @@ export default {
 
             // 2. Estados del mensaje (puedes añadir los que quieras)
             const estados = [
-                "⚠️ ERROR DE SISTEMA: 0x001",
-                "📡 Sincronizando datos con Meta...",
-                "👁️ Te estoy observando.",
-                "⌛ Mensaje autodestruyéndose...",
-                "🤖 [BOT] Protocolo de defensa activo.",
-                "❌ ACCESO DENEGADO",
-                "🔓 ACCESO CONCEDIDO",
-                "🌀 Glitch en la realidad detectado."
-            ];
+                "CRITICAL_ERROR: Stack buffer overflow at 0x0004F2 - Process terminated.",
+                "STATUS_DEVICE_NOT_READY: The physical drive responded with a non-retryable error.",
+                "SYNC_FAILURE: Hash mismatch detected in local metadata. Operation aborted.",
+                "KERNEL_THREAD_PANIC: IRQ_NOT_LESS_OR_EQUAL (0x0000000A)...",
+                "PROTOCOL_TIMEOUT: Handshake failed after 3000ms. Remote host unreachable.",
+                "ACCESS_DENIED: User lacks 'ROOT_EXECUTE' privileges for this binary.",
+                "FATAL: Memory allocation failed (OOM). Pointer returned NULL."            ];
 
             // 3. Envío del mensaje base
             const quantumMsg = await sock.sendMessage(remitente, { text: estados[0] });
