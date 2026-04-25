@@ -19,7 +19,7 @@ global.db.defaults({
 
 console.log('[INFO] Base de datos JSON cargada y lista.');
 
-// Variables de estado global para funciones especiales
+// Variables de estado global
 global.sniperTargets = {}; 
 global.plugins = [];
 
@@ -33,14 +33,11 @@ binarios.forEach(bin => {
     if (fs.existsSync(binPath) && !isWindows) {
         try { 
             fs.chmodSync(binPath, '755'); 
-        } catch (e) {
-            console.error(`[ERROR] No se pudo dar permisos a ${fileName}`);
-        }
+        } catch (e) {}
     }
 });
 
 async function iniciarBot() {
-    // --- CARGA DINÁMICA DE PLUGINS ---
     const pluginsDir = path.join(__dirname, 'plugins');
     if (!fs.existsSync(pluginsDir)) fs.mkdirSync(pluginsDir);
     
@@ -72,29 +69,27 @@ async function iniciarBot() {
     sock.ev.on('creds.update', saveCreds);
 
     // ==========================================
-    //       CORE: LISTENER DE PRESENCIA (SNIPER)
+    //    CORE: TYPING & RECORDING SNIPER
     // ==========================================
     sock.ev.on('presence.update', async ({ id, presences }) => {
         const target = id;
         const status = presences[target]?.lastKnownPresence;
 
-        // Si el objetivo está marcado y empieza a escribir
-        if (global.sniperTargets && global.sniperTargets[target] && status === 'composing') {
+        // Detecta 'composing' (escribiendo) o 'recording' (grabando audio)
+        if (global.sniperTargets && global.sniperTargets[target] && (status === 'composing' || status === 'recording')) {
             try {
-                await new Promise(r => setTimeout(r, 600)); // Delay para naturalidad
+                // Pequeño delay para que la respuesta entre justo después de que empiecen
+                await new Promise(r => setTimeout(r, 700));
                 
-                const balas = ["?", ".", "👁️", "Dime", "Escribiendo..."];
-                const shot = balas[Math.floor(Math.random() * balas.length)];
-                
-                await sock.sendMessage(target, { text: shot });
+                await sock.sendMessage(target, { text: 'Dime?' });
 
-                // Cooldown de 5 segundos para evitar baneo por spam automático
+                // Cooldown de seguridad para no saturar el socket
                 global.sniperTargets[target] = false; 
                 setTimeout(() => { 
                     if (global.sniperTargets) global.sniperTargets[target] = true; 
-                }, 5000);
+                }, 7000);
             } catch (e) {
-                console.error("Error en Typing Sniper Shot:", e);
+                console.error("Error en Sniper Shot:", e);
             }
         }
     });
@@ -103,7 +98,6 @@ async function iniciarBot() {
         const { connection, qr } = update;
         if (qr) qrcode.generate(qr, { small: true });
         if (connection === 'close') {
-            console.log('[INFO] Conexión cerrada. Reconectando...');
             iniciarBot();
         } else if (connection === 'open') {
             console.log(`[INFO] ¡Conectado! (${global.plugins.length} plugins cargados)`);
@@ -127,9 +121,7 @@ async function iniciarBot() {
         global.db.data = global.db.getState();
         const remitente = msg.key.remoteJid;
         
-        let texto = msg.message.conversation 
-            || msg.message.extendedTextMessage?.text 
-            || "";
+        let texto = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
         
         let buttonText = "";
         try {
@@ -147,9 +139,7 @@ async function iniciarBot() {
         }
         
         if (buttonText) texto = buttonText;
-        
         const textoLimpio = texto.trim();
-        // Se añade stickerMessage a la lista de detección
         const msgType = Object.keys(msg.message).find(k => ['videoMessage', 'imageMessage', 'documentMessage', 'audioMessage', 'stickerMessage'].includes(k));
         const quoted = msg.message.extendedTextMessage?.contextInfo?.quotedMessage;
 
@@ -160,16 +150,7 @@ async function iniciarBot() {
 
         if (isGroup && settings.grupos === false && !/^\.grupo\s+on$/i.test(textoLimpio)) return;
 
-        const ctx = { 
-            sock, 
-            msg, 
-            remitente, 
-            textoLimpio, 
-            getMediaInfo, 
-            downloadContentFromMessage, 
-            quoted, 
-            msgType 
-        };
+        const ctx = { sock, msg, remitente, textoLimpio, getMediaInfo, downloadContentFromMessage, quoted, msgType };
 
         for (const plugin of global.plugins) {
             if (plugin.match && plugin.match(textoLimpio, ctx)) {
