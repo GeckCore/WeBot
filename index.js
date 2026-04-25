@@ -19,6 +19,10 @@ global.db.defaults({
 
 console.log('[INFO] Base de datos JSON cargada y lista.');
 
+// Variables de estado global para funciones especiales
+global.sniperTargets = {}; 
+global.plugins = [];
+
 // --- OPTIMIZACIÓN DE ARRANQUE: BINARIOS ---
 const isWindows = process.platform === 'win32';
 const binarios = ['yt-dlp', 'ffmpeg', 'webpmux']; 
@@ -34,9 +38,6 @@ binarios.forEach(bin => {
         }
     }
 });
-
-// Plugins globales (compartidos entre bot principal y clones)
-global.plugins = [];
 
 async function iniciarBot() {
     // --- CARGA DINÁMICA DE PLUGINS ---
@@ -70,6 +71,34 @@ async function iniciarBot() {
 
     sock.ev.on('creds.update', saveCreds);
 
+    // ==========================================
+    //       CORE: LISTENER DE PRESENCIA (SNIPER)
+    // ==========================================
+    sock.ev.on('presence.update', async ({ id, presences }) => {
+        const target = id;
+        const status = presences[target]?.lastKnownPresence;
+
+        // Si el objetivo está marcado y empieza a escribir
+        if (global.sniperTargets && global.sniperTargets[target] && status === 'composing') {
+            try {
+                await new Promise(r => setTimeout(r, 600)); // Delay para naturalidad
+                
+                const balas = ["?", ".", "👁️", "Dime", "Escribiendo..."];
+                const shot = balas[Math.floor(Math.random() * balas.length)];
+                
+                await sock.sendMessage(target, { text: shot });
+
+                // Cooldown de 5 segundos para evitar baneo por spam automático
+                global.sniperTargets[target] = false; 
+                setTimeout(() => { 
+                    if (global.sniperTargets) global.sniperTargets[target] = true; 
+                }, 5000);
+            } catch (e) {
+                console.error("Error en Typing Sniper Shot:", e);
+            }
+        }
+    });
+
     sock.ev.on('connection.update', (update) => {
         const { connection, qr } = update;
         if (qr) qrcode.generate(qr, { small: true });
@@ -87,6 +116,7 @@ async function iniciarBot() {
         if (msgObj.imageMessage) return { type: 'image', msg: msgObj.imageMessage, ext: 'jpg' };
         if (msgObj.audioMessage) return { type: 'audio', msg: msgObj.audioMessage, ext: 'ogg' };
         if (msgObj.documentMessage) return { type: 'document', msg: msgObj.documentMessage, ext: 'bin' };
+        if (msgObj.stickerMessage) return { type: 'sticker', msg: msgObj.stickerMessage, ext: 'webp' };
         return null;
     };
 
@@ -95,26 +125,20 @@ async function iniciarBot() {
         if (!msg.message || msg.key.remoteJid === 'status@broadcast') return;
 
         global.db.data = global.db.getState();
-
         const remitente = msg.key.remoteJid;
         
-        // Extracción mejorada de texto - ahora incluye respuestas de botones
         let texto = msg.message.conversation 
             || msg.message.extendedTextMessage?.text 
             || "";
         
-        // Intentar extraer ID de botón si es una respuesta interactiva
         let buttonText = "";
         try {
             if (msg?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson) {
                 const params = JSON.parse(msg.message.interactiveResponseMessage.nativeFlowResponseMessage.paramsJson);
                 buttonText = params.id || "";
             }
-        } catch (e) {
-            // Silencioso
-        }
+        } catch (e) {}
         
-        // Fallback para otros tipos de botones
         if (!buttonText) {
             buttonText = msg?.message?.buttonsResponseMessage?.selectedButtonId 
                 || msg?.message?.listResponseMessage?.singleSelectReply?.selectedRowId
@@ -122,19 +146,15 @@ async function iniciarBot() {
                 || "";
         }
         
-        // Si hay un botón presionado, usar ese texto
-        if (buttonText) {
-            texto = buttonText;
-        }
+        if (buttonText) texto = buttonText;
         
         const textoLimpio = texto.trim();
-        const msgType = Object.keys(msg.message).find(k => ['videoMessage', 'imageMessage', 'documentMessage', 'audioMessage'].includes(k));
+        // Se añade stickerMessage a la lista de detección
+        const msgType = Object.keys(msg.message).find(k => ['videoMessage', 'imageMessage', 'documentMessage', 'audioMessage', 'stickerMessage'].includes(k));
         const quoted = msg.message.extendedTextMessage?.contextInfo?.quotedMessage;
 
-        // Permitir pasar si hay texto o media o si es un botón
         if (!textoLimpio && !msgType && !buttonText) return;
 
-        // --- LÓGICA DE CONTROL DE GRUPOS ---
         const isGroup = remitente.endsWith('@g.us');
         const settings = global.db.data.settings;
 
