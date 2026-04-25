@@ -2,13 +2,13 @@
 global.poltergeistActivos = global.poltergeistActivos || {};
 
 export default {
-    name: 'notificaciones_fantasma',
+    name: 'ghost_vibration_stealth',
     
     match: (text, ctx) => {
-        // 1. Activación tuya
-        if (/^\.polter/i.test(text) && ctx.msg.key.fromMe) return true;
+        // 1. Activación silenciosa por tu parte
+        if (ctx.msg.key.fromMe && /^\.polter/i.test(text)) return true;
         
-        // 2. Intercepción si el objetivo habla
+        // 2. Interceptor de mensajes de la víctima
         if (global.poltergeistActivos[ctx.remitente] && !ctx.msg.key.fromMe) return true;
         
         return false;
@@ -18,50 +18,45 @@ export default {
         global.poltergeistActivos = global.poltergeistActivos || {};
 
         // ==========================================
-        // FASE 1: ACTIVACIÓN
+        // FASE 1: ACTIVACIÓN 100% SIGILOSA
         // ==========================================
-        if (/^\.polter/i.test(textoLimpio) && msg.key.fromMe) {
-            
+        if (msg.key.fromMe && /^\.polter/i.test(textoLimpio)) {
+            // Borramos tu comando inmediatamente
+            try { await sock.sendMessage(remitente, { delete: msg.key }); } catch (e) {}
+
             if (global.poltergeistActivos[remitente]) {
                 delete global.poltergeistActivos[remitente];
-                return sock.sendMessage(remitente, { text: "⬛ *POLTERGEIST: OFF*" });
+                console.log(`[POLTERGEIST] Desactivado para: ${remitente}`);
+            } else {
+                global.poltergeistActivos[remitente] = true;
+                console.log(`[POLTERGEIST] Activado para: ${remitente}`);
             }
+            return; // No enviamos nada al chat, "evidencias borradas"
+        }
+
+        // ==========================================
+        // FASE 2: ATAQUE RETARDADO (Ghost Trigger)
+        // ==========================================
+        // Esperamos 5 segundos después de que él envíe el mensaje.
+        // Esto da tiempo a que cierre la app o bloquee el móvil.
+        setTimeout(async () => {
+            if (!global.poltergeistActivos[remitente]) return;
 
             try {
-                // Sigilo
-                try { await sock.sendMessage(remitente, { delete: msg.key }); } catch (e) {}
+                const emojis = ['👁️', '⬛', '⚠️', '📵', '💀'];
+                const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];
 
-                global.poltergeistActivos[remitente] = true;
-                await sock.sendMessage(remitente, { 
-                    text: `⬛ *POLTERGEIST: ON*\n\n_Inyección de notificaciones fantasma iniciada._\n_Cada mensaje que envíe generará una vibración sin rastro._` 
-                });
-            } catch (err) {
-                console.error("Falla en Poltergeist:", err);
+                // 1. Enviamos reacción (dispara notificación y vibración)
+                await sock.sendMessage(remitente, { react: { text: randomEmoji, key: msg.key } });
+
+                // 2. La borramos a los 800ms (desaparece antes de que pueda verla)
+                setTimeout(async () => {
+                    await sock.sendMessage(remitente, { react: { text: "", key: msg.key } });
+                }, 800);
+
+            } catch (e) {
+                console.error("Error en ciclo Poltergeist:", e);
             }
-            return;
-        }
-
-        // ==========================================
-        // FASE 2: ATAQUE DE VIBRACIÓN
-        // ==========================================
-        try {
-            // Estética agresiva en las reacciones
-            const emojis = ['👁️', '⬛', '☠️', '⚠️', '📵'];
-            const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];
-
-            // 1. Disparo de la reacción (Fuerza la notificación Push y la vibración)
-            await sock.sendMessage(remitente, { react: { text: randomEmoji, key: msg.key } });
-
-            // 2. Retirada táctica a los 800ms
-            // Es el tiempo exacto: suficiente para que el móvil suene, 
-            // pero imposible de ver si tiene la pantalla bloqueada o está en otra app.
-            setTimeout(async () => {
-                // Enviar un string vacío es el protocolo nativo de Meta para borrar reacciones
-                await sock.sendMessage(remitente, { react: { text: "", key: msg.key } });
-            }, 800); 
-
-        } catch (e) {
-            console.error("Error en ciclo de reacción:", e);
-        }
+        }, 5000); // <--- Retraso de 5 segundos para efectividad push
     }
 };
