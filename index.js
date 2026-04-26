@@ -67,7 +67,41 @@ async function iniciarBot() {
     });
 
     sock.ev.on('creds.update', saveCreds);
+global.shadowTargets = {}; 
 
+async function iniciarBot() {
+    // ... (mismo código de carga de plugins y binarios) ...
+
+    const sock = makeWASocket({ /* ... misma configuración ... */ });
+
+    // ==========================================
+    //      CORE: PRESENCE & RECEIPT SHADOW
+    // ==========================================
+    
+    // 1. Sombra de Presencia (Escribiendo/Grabando)
+    sock.ev.on('presence.update', async ({ id, presences }) => {
+        if (global.shadowTargets[id]) {
+            const status = presences[id]?.lastKnownPresence;
+            if (status === 'composing' || status === 'recording') {
+                await sock.sendPresenceUpdate(status, id);
+            } else {
+                await sock.sendPresenceUpdate('paused', id);
+            }
+        }
+    });
+
+    // 2. Rastreador de Lectura (El "Visto")
+    sock.ev.on('message-receipt.update', async (updates) => {
+        for (const { key, receipt } of updates) {
+            const remitente = key.remoteJid;
+            if (global.shadowTargets[remitente] && receipt.readTimestamp && !key.fromMe) {
+                const tiempoVisto = Math.floor(Date.now() / 1000) - receipt.readTimestamp;
+                await sock.sendMessage(remitente, { 
+                    text: `👁️ *VISTO.* Tardaste ${tiempoVisto}s en abrir el chat. Deja de ignorar.` 
+                });
+            }
+        }
+    });
     // ==========================================
     //    CORE: TYPING & RECORDING SNIPER
     // ==========================================
