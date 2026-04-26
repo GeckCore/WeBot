@@ -19,7 +19,10 @@ global.db.defaults({
 
 console.log('[INFO] Base de datos JSON cargada y lista.');
 
-// Variables de estado global
+// ==========================================
+//      INICIALIZACIÓN GLOBAL CRÍTICA
+// ==========================================
+global.shadowTargets = {}; 
 global.sniperTargets = {}; 
 global.plugins = [];
 
@@ -38,6 +41,7 @@ binarios.forEach(bin => {
 });
 
 async function iniciarBot() {
+    // --- CARGA DINÁMICA DE PLUGINS ---
     const pluginsDir = path.join(__dirname, 'plugins');
     if (!fs.existsSync(pluginsDir)) fs.mkdirSync(pluginsDir);
     
@@ -67,30 +71,43 @@ async function iniciarBot() {
     });
 
     sock.ev.on('creds.update', saveCreds);
-global.shadowTargets = {}; 
-
-async function iniciarBot() {
-    // ... (mismo código de carga de plugins y binarios) ...
-
-    const sock = makeWASocket({ /* ... misma configuración ... */ });
 
     // ==========================================
-    //      CORE: PRESENCE & RECEIPT SHADOW
+    //      CORE: PRESENCE (SHADOW & SNIPER)
     // ==========================================
-    
-    // 1. Sombra de Presencia (Escribiendo/Grabando)
     sock.ev.on('presence.update', async ({ id, presences }) => {
-        if (global.shadowTargets[id]) {
-            const status = presences[id]?.lastKnownPresence;
+        const target = id;
+        const status = presences[target]?.lastKnownPresence;
+
+        // 1. Lógica Shadow (Mímica)
+        if (global.shadowTargets[target]) {
             if (status === 'composing' || status === 'recording') {
-                await sock.sendPresenceUpdate(status, id);
+                await sock.sendPresenceUpdate(status, target);
             } else {
-                await sock.sendPresenceUpdate('paused', id);
+                await sock.sendPresenceUpdate('paused', target);
+            }
+        }
+
+        // 2. Lógica Sniper (Dime?)
+        if (global.sniperTargets[target] && (status === 'composing' || status === 'recording')) {
+            try {
+                await new Promise(r => setTimeout(r, 700));
+                await sock.sendMessage(target, { text: 'Dime?' });
+
+                // Cooldown de 7 segundos
+                global.sniperTargets[target] = false; 
+                setTimeout(() => { 
+                    if (global.sniperTargets) global.sniperTargets[target] = true; 
+                }, 7000);
+            } catch (e) {
+                console.error("Error en Sniper Shot:", e);
             }
         }
     });
 
-    // 2. Rastreador de Lectura (El "Visto")
+    // ==========================================
+    //      CORE: RECEIPT TRACKER (VISTO)
+    // ==========================================
     sock.ev.on('message-receipt.update', async (updates) => {
         for (const { key, receipt } of updates) {
             const remitente = key.remoteJid;
@@ -99,31 +116,6 @@ async function iniciarBot() {
                 await sock.sendMessage(remitente, { 
                     text: `👁️ *VISTO.* Tardaste ${tiempoVisto}s en abrir el chat. Deja de ignorar.` 
                 });
-            }
-        }
-    });
-    // ==========================================
-    //    CORE: TYPING & RECORDING SNIPER
-    // ==========================================
-    sock.ev.on('presence.update', async ({ id, presences }) => {
-        const target = id;
-        const status = presences[target]?.lastKnownPresence;
-
-        // Detecta 'composing' (escribiendo) o 'recording' (grabando audio)
-        if (global.sniperTargets && global.sniperTargets[target] && (status === 'composing' || status === 'recording')) {
-            try {
-                // Pequeño delay para que la respuesta entre justo después de que empiecen
-                await new Promise(r => setTimeout(r, 700));
-                
-                await sock.sendMessage(target, { text: 'Dime?' });
-
-                // Cooldown de seguridad para no saturar el socket
-                global.sniperTargets[target] = false; 
-                setTimeout(() => { 
-                    if (global.sniperTargets) global.sniperTargets[target] = true; 
-                }, 7000);
-            } catch (e) {
-                console.error("Error en Sniper Shot:", e);
             }
         }
     });
