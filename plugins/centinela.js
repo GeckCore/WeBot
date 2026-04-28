@@ -18,43 +18,69 @@ export default {
 
             global.db.data.vigilancia[remitente] = { logs: [] };
             
-            // EL TRUCO: Forzamos la suscripción activa al servidor de Meta
             try {
                 await sock.presenceSubscribe(remitente);
             } catch (err) {
                 console.error("Fallo al suscribir presencia:", err);
             }
             
-            console.log(`[CENTINELA] Ojo fijado. Suscripción de presencia activa para ${remitente}`);
+            console.log(`[CENTINELA] Ojo fijado. Suscripción activa para ${remitente}`);
             return;
         }
 
-        // --- COMANDO .viewvigile ---
+        // --- COMANDO .viewvigile (REPORTE GLOBAL) ---
         if (command === '.viewvigile') {
-            const data = global.db.data.vigilancia[remitente];
+            const dataVigilancia = global.db.data.vigilancia || {};
+            const targets = Object.keys(dataVigilancia);
             
-            if (!data || data.logs.length === 0) {
-                return sock.sendMessage(remitente, { text: "❌ Base de datos vacía o el objetivo tiene el 'En línea' oculto por privacidad." });
+            if (targets.length === 0) {
+                return sock.sendMessage(remitente, { text: "❌ No tienes a nadie bajo vigilancia actualmente." });
             }
 
-            let informe = `📊 *INFORME DE ACTIVIDAD*\n*Target:* ${remitente.split('@')[0]}\n\n`;
-            let tiempoTotal = 0;
+            let informeFinal = "📊 *INFORME DE VIGILANCIA GLOBAL*\n\n";
+            
+            // Forzamos la zona horaria de Canarias
+            const opcionesHora = { 
+                timeZone: 'Atlantic/Canary', 
+                hour12: true, 
+                hour: '2-digit', 
+                minute: '2-digit', 
+                second: '2-digit' 
+            };
 
-            // Mostramos solo las últimas 15 sesiones para no petar el chat
-            data.logs.slice(-15).forEach((log, i) => {
-                const hInicio = new Date(log.inicio).toLocaleTimeString();
-                const hFin = new Date(log.fin).toLocaleTimeString();
-                const min = Math.floor(log.duracion / 60000);
-                const seg = Math.floor((log.duracion % 60000) / 1000);
+            for (const target of targets) {
+                const logs = dataVigilancia[target].logs || [];
+                const numero = target.split('@')[0];
                 
-                informe += `*Sesión ${i + 1}:*\n> ⏳ ${hInicio} - ${hFin}\n> ⏱️ Duración: ${min}m ${seg}s\n\n`;
-                tiempoTotal += log.duracion;
-            });
+                informeFinal += `👤 *Target:* \`+${numero}\`\n`;
 
-            const totalMin = Math.floor(tiempoTotal / 60000);
-            informe += `--- \n*TIEMPO TOTAL EN LÍNEA (Últ. 15 ses.):* ${totalMin} minutos.`;
+                if (logs.length === 0) {
+                    informeFinal += `> ❌ Sin registros (perfil oculto o no se ha conectado).\n\n`;
+                    informeFinal += `━━━━━━━━━━━━━━━━━━━━\n\n`;
+                    continue;
+                }
 
-            await sock.sendMessage(remitente, { text: informe });
+                let tiempoTotal = 0;
+                let sesionesTexto = "";
+
+                // Limitamos a las últimas 10 sesiones por persona para no saturar
+                logs.slice(-10).forEach((log, i) => {
+                    const hInicio = new Date(log.inicio).toLocaleTimeString('es-ES', opcionesHora);
+                    const hFin = new Date(log.fin).toLocaleTimeString('es-ES', opcionesHora);
+                    const min = Math.floor(log.duracion / 60000);
+                    const seg = Math.floor((log.duracion % 60000) / 1000);
+                    
+                    sesionesTexto += `  *Sesión ${i + 1}:*\n  > ⏳ ${hInicio} - ${hFin}\n  > ⏱️ Duración: ${min}m ${seg}s\n\n`;
+                    tiempoTotal += log.duracion;
+                });
+
+                const totalMin = Math.floor(tiempoTotal / 60000);
+                informeFinal += sesionesTexto;
+                informeFinal += `*TIEMPO TOTAL EN LÍNEA:* ${totalMin} minutos.\n`;
+                informeFinal += `━━━━━━━━━━━━━━━━━━━━\n\n`;
+            }
+
+            await sock.sendMessage(remitente, { text: informeFinal.trim() });
         }
     }
 };
