@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WhatsApp Bot - Documentation</title>
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <!-- Inter for UI, Fira Code for commands -->
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <!-- Icons -->
+    <link href='https://unpkg.com/boxicons@2.1.4/css/boxicons.min.css' rel='stylesheet'>
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+    <div class="layout-wrapper">
+        
+        <!-- Left Panel: Documentation & Commands -->
+        <main class="docs-panel">
+            <header class="docs-header">
+                <div class="logo-wrapper">
+                    <img src="media/logo.png" alt="Logo" class="bot-logo">
+                    <div class="status-indicator"></div>
+                </div>
+                <h1>Bot Reference</h1>
+                <p>Documentación técnica y listado de comandos interactivos. Haz clic en un comando para ver su funcionamiento en vivo.</p>
+            </header>
+
+            <nav class="commands-nav">
+                
+                <!-- Category 1 -->
+                <div class="category">
+                    <h2 class="category-title">Multimedia & Descargas</h2>
+                    <ul class="command-list">
+                        <li class="command-item" data-cmd="downloads">
+                            <span class="cmd-name">downloads.js</span>
+                            <span class="cmd-desc">Extrae multimedia de TikTok/IG.</span>
+                        </li>
+                        <li class="command-item" data-cmd="play">
+                            <span class="cmd-name">play.js</span>
+                            <span class="cmd-desc">Descarga desde YouTube.</span>
+                        </li>
+                        <li class="command-item" data-cmd="tomp3">
+                            <span class="cmd-name">tomp3.js</span>
+                            <span class="cmd-desc">Extrae audio de video.</span>
+                        </li>
+                        <li class="command-item" data-cmd="webscreenshot">
+                            <span class="cmd-name">web_screenshot.js</span>
+                            <span class="cmd-desc">Captura de pantalla web.</span>
+                        </li>
+                    </ul>
+                </div>
+
+                <!-- Category 2 -->
+                <div class="category">
+                    <h2 class="category-title">Utilidades y Herramientas</h2>
+                    <ul class="command-list">
+                        <li class="command-item" data-cmd="lyrics">
+                            <span class="cmd-name">lyrics.js</span>
+                            <span class="cmd-desc">Busca letras de canciones.</span>
+                        </li>
+                        <li class="command-item" data-cmd="translate">
+                            <span class="cmd-name">translate.js</span>
+                            <span class="cmd-desc">Traductor rápido.</span>
+                        </li>
+                        <li class="command-item" data-cmd="qr">
+                            <span class="cmd-name">qr.js</span>
+                            <span class="cmd-desc">Crea un código QR.</span>
+                        </li>
+                        <li class="command-item" data-cmd="readqr">
+                            <span class="cmd-name">readqr.js</span>
+                            <span class="cmd-desc">Lee un código QR.</span>
+                        </li>
+                        <li class="command-item" data-cmd="remind">
+                            <span class="cmd-name">remind.js</span>
+                            <span class="cmd-desc">Agenda recordatorios.</span>
+                        </li>
+                    </ul>
+                </div>
+
+                <!-- Category 3 -->
+                <div class="category">
+                    <h2 class="category-title">Stickers</h2>
+                    <ul class="command-list">
+                        <li class="command-item" data-cmd="sticker">
+                            <span class="cmd-name">sticker.js</span>
+                            <span class="cmd-desc">Genera stickers de imagen/video.</span>
+                        </li>
+                        <li class="command-item" data-cmd="stickerimg">
+                            <span class="cmd-name">sticker_converter.js</span>
+                            <span class="cmd-desc">Convierte sticker a imagen.</span>
+                        </li>
+                    </ul>
+                </div>
+
+                <!-- Category 4 -->
+                <div class="category">
+                    <h2 class="category-title">Gestión de Grupos</h2>
+                    <ul class="command-list">
+                        <li class="command-item" data-cmd="tagall">
+                            <span class="cmd-name">tagall.js</span>
+                            <span class="cmd-desc">Mención masiva en grupos.</span>
+                        </li>
+                        <li class="command-item" data-cmd="grupo">
+                            <span class="cmd-name">grupo.js</span>
+                            <span class="cmd-desc">Abre/cierra el bot en grupos.</span>
+                        </li>
+                        <li class="command-item" data-cmd="warn">
+                            <span class="cmd-name">warn.js</span>
+                            <span class="cmd-desc">Advierte a un miembro.</span>
+                        </li>
+                    </ul>
+                </div>
+
+                <!-- Category 5 -->
+                <div class="category">
+                    <h2 class="category-title">Sistema</h2>
+                    <ul class="command-list">
+                        <li class="command-item" data-cmd="stats">
+                            <span class="cmd-name">stats.js</span>
+                            <span class="cmd-desc">Monitor de rendimiento VPS.</span>
+                        </li>
+                    </ul>
+                </div>
+
+            </nav>
+            
+            <footer class="docs-footer">
+                <p>&copy; 2026 Bot Platform. v1.0.0</p>
+            </footer>
+        </main>
+
+        <!-- Right Panel: Live Preview -->
+        <aside class="preview-panel">
+            
+            <!-- Mobile Toggle Hint -->
+            <div class="mobile-preview-hint">
+                <i class='bx bx-mobile-alt'></i> Toca un comando para simular
+            </div>
+
+            <!-- Phone Mockup -->
+            <div class="phone-mockup">
+                
+                <div class="phone-header">
+                    <div class="phone-contact">
+                        <div class="avatar-container">
+                            <img src="media/logo.png" alt="Bot">
+                        </div>
+                        <div class="contact-info">
+                            <h3>Bot System</h3>
+                            <span class="status" id="bot-status">en línea</span>
+                        </div>
+                    </div>
+                    <div class="phone-actions">
+                        <i class='bx bx-video'></i>
+                        <i class='bx bx-phone'></i>
+                        <i class='bx bx-dots-vertical-rounded'></i>
+                    </div>
+                </div>
+
+                <div class="chat-container" id="chat-container">
+                    <!-- Default state -->
+                    <div class="message bot">
+                        <div class="msg-content">👋 ¡Hola! Soy el sistema automatizado. Haz clic en un comando del menú lateral para ver cómo funciono.</div>
+                    </div>
+                </div>
+
+                <div class="phone-footer">
+                    <div class="chat-input-bar">
+                        <i class='bx bx-smile'></i>
+                        <div class="fake-input" id="fake-input">Escribe un mensaje...</div>
+                        <i class='bx bx-paperclip'></i>
+                        <div class="send-btn">
+                            <i class='bx bxs-microphone' id="send-icon"></i>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </aside>
+
+    </div>
+
+    <!-- Custom JS -->
+    <script src="js/main.js"></script>
+</body>
+</html>
