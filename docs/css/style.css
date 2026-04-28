@@ -1,5 +1,4 @@
-:root {
-    /* Color Palette - Premium Dark */
+:root[data-theme="dark"] {
     --bg-main: #0a0a0a;
     --bg-panel: #111111;
     --border-color: #222222;
@@ -9,22 +8,47 @@
     --text-secondary: #888888;
     --text-muted: #555555;
     
-    /* WhatsApp Dark Mode Colors */
+    /* WhatsApp Dark Mode */
     --wa-bg: #0b141a;
     --wa-header: #202c33;
     --wa-msg-in: #202c33;
     --wa-msg-out: #005c4b;
     --wa-text: #e9edef;
+    --wa-input-bg: #2a3942;
+    --wa-icon: #8696a0;
     
-    /* Accents */
+    --phone-border: #1c1c1c;
     --accent: #00ff88;
     --accent-glow: rgba(0, 255, 136, 0.15);
+}
+
+:root[data-theme="light"] {
+    --bg-main: #f9fafb;
+    --bg-panel: #ffffff;
+    --border-color: #e5e7eb;
+    --border-hover: #d1d5db;
     
-    /* Typography */
+    --text-primary: #111827;
+    --text-secondary: #4b5563;
+    --text-muted: #9ca3af;
+    
+    /* WhatsApp Light Mode */
+    --wa-bg: #efeae2;
+    --wa-header: #f0f2f5;
+    --wa-msg-in: #ffffff;
+    --wa-msg-out: #d9fdd3;
+    --wa-text: #111b21;
+    --wa-input-bg: #ffffff;
+    --wa-icon: #54656f;
+    
+    --phone-border: #e2e8f0;
+    --accent: #00b862;
+    --accent-glow: rgba(0, 184, 98, 0.15);
+}
+
+:root {
     --font-ui: 'Inter', sans-serif;
     --font-mono: 'Fira Code', monospace;
-    
-    /* Transitions */
     --transition: 0.2s ease-in-out;
 }
 
@@ -40,13 +64,55 @@ body {
     color: var(--text-primary);
     line-height: 1.5;
     -webkit-font-smoothing: antialiased;
+    transition: background-color 0.4s ease, color 0.4s ease;
 }
 
-/* Layout Wrapper */
 .layout-wrapper {
     display: flex;
     min-height: 100vh;
 }
+
+/* =========================================================
+   HEADER & THEME TOGGLE
+   ========================================================= */
+.header-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+}
+
+.theme-btn {
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: 50px;
+    width: 44px;
+    height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: var(--text-primary);
+    transition: all 0.3s ease;
+    overflow: hidden;
+    position: relative;
+}
+
+.theme-btn:hover {
+    background: var(--border-hover);
+}
+
+.theme-btn i {
+    font-size: 1.4rem;
+    position: absolute;
+    transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275), opacity 0.4s ease;
+}
+
+/* Theme Icon Animation */
+[data-theme="dark"] .icon-sun { transform: translateY(30px); opacity: 0; }
+[data-theme="dark"] .icon-moon { transform: translateY(0); opacity: 1; }
+
+[data-theme="light"] .icon-sun { transform: translateY(0); opacity: 1; }
+[data-theme="light"] .icon-moon { transform: translateY(-30px); opacity: 0; }
 
 /* =========================================================
    LEFT PANEL (Documentation)
@@ -56,11 +122,10 @@ body {
     padding: 60px 80px 60px 10vw;
     border-right: 1px solid var(--border-color);
     background: var(--bg-main);
+    transition: background-color 0.4s ease, border-color 0.4s ease;
 }
 
-.docs-header {
-    margin-bottom: 50px;
-}
+.docs-header { margin-bottom: 50px; }
 
 .logo-wrapper {
     position: relative;
@@ -74,6 +139,7 @@ body {
     border-radius: 12px;
     object-fit: cover;
     border: 1px solid var(--border-color);
+    background: white; /* Always white bg for logo readability */
 }
 
 .status-indicator {
@@ -85,6 +151,7 @@ body {
     background-color: var(--accent);
     border: 3px solid var(--bg-main);
     border-radius: 50%;
+    transition: border-color 0.4s ease;
 }
 
 .docs-header h1 {
@@ -100,10 +167,8 @@ body {
     max-width: 500px;
 }
 
-/* Category & Commands List */
-.category {
-    margin-bottom: 40px;
-}
+/* Commands List */
+.category { margin-bottom: 40px; }
 
 .category-title {
     font-size: 0.85rem;
@@ -119,6 +184,7 @@ body {
     list-style: none;
     border-left: 1px solid var(--border-color);
     margin-left: 15px;
+    transition: border-color 0.4s ease;
 }
 
 .command-item {
@@ -126,14 +192,20 @@ body {
     margin-left: -1px;
     border-left: 2px solid transparent;
     cursor: pointer;
-    transition: var(--transition);
+    transition: all 0.2s ease;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.cmd-info {
     display: flex;
     flex-direction: column;
     gap: 4px;
 }
 
 .command-item:hover {
-    background: rgba(255, 255, 255, 0.02);
+    background: var(--accent-glow);
     border-left-color: var(--border-hover);
 }
 
@@ -148,13 +220,36 @@ body {
     color: var(--text-primary);
 }
 
-.command-item.active .cmd-name {
-    color: var(--accent);
+.command-item.active .cmd-name { color: var(--accent); }
+.cmd-desc { font-size: 0.9rem; color: var(--text-secondary); }
+
+/* Copy Button */
+.copy-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 8px;
+    border-radius: 8px;
+    opacity: 0;
+    transform: scale(0.8);
+    transition: all 0.2s ease;
+    font-size: 1.2rem;
 }
 
-.cmd-desc {
-    font-size: 0.9rem;
-    color: var(--text-secondary);
+.command-item:hover .copy-btn, 
+.command-item.active .copy-btn {
+    opacity: 1;
+    transform: scale(1);
+}
+
+.copy-btn:hover {
+    background: var(--border-color);
+    color: var(--text-primary);
+}
+
+.copy-btn.copied {
+    color: var(--accent);
 }
 
 .docs-footer {
@@ -164,7 +259,6 @@ body {
     color: var(--text-muted);
     font-size: 0.85rem;
 }
-
 
 /* =========================================================
    RIGHT PANEL (Live Preview / Phone Mockup)
@@ -179,13 +273,13 @@ body {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    background-image: radial-gradient(circle at 50% 50%, rgba(255,255,255,0.03) 1px, transparent 1px);
+    background-image: radial-gradient(circle at 50% 50%, var(--border-color) 1px, transparent 1px);
     background-size: 20px 20px;
+    transition: background-color 0.4s ease;
 }
 
-.mobile-preview-hint {
-    display: none;
-}
+.mobile-overlay { display: none; }
+.close-mockup-btn { display: none; }
 
 /* The Phone */
 .phone-mockup {
@@ -193,15 +287,16 @@ body {
     height: 720px;
     background: var(--wa-bg);
     border-radius: 40px;
-    border: 8px solid #1c1c1c;
-    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5), inset 0 0 0 1px rgba(255,255,255,0.1);
+    border: 8px solid var(--phone-border);
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.2);
     display: flex;
     flex-direction: column;
     overflow: hidden;
     position: relative;
+    transition: background-color 0.4s ease, border-color 0.4s ease;
 }
 
-/* Phone Notch (Optional realism) */
+/* Phone Notch */
 .phone-mockup::before {
     content: '';
     position: absolute;
@@ -210,20 +305,22 @@ body {
     transform: translateX(-50%);
     width: 120px;
     height: 25px;
-    background: #1c1c1c;
+    background: var(--phone-border);
     border-bottom-left-radius: 15px;
     border-bottom-right-radius: 15px;
     z-index: 10;
+    transition: background-color 0.4s ease;
 }
 
 /* WA Header */
 .phone-header {
     background: var(--wa-header);
-    padding: 40px 15px 12px; /* Top padding for notch */
+    padding: 40px 15px 12px;
     display: flex;
     justify-content: space-between;
     align-items: center;
     z-index: 5;
+    transition: background-color 0.4s ease;
 }
 
 .phone-contact {
@@ -247,13 +344,13 @@ body {
 
 .contact-info .status {
     font-size: 0.8rem;
-    color: #8696a0;
+    color: var(--wa-icon);
 }
 
 .phone-actions {
     display: flex;
     gap: 15px;
-    color: #aebac1;
+    color: var(--wa-icon);
     font-size: 1.3rem;
 }
 
@@ -267,17 +364,18 @@ body {
     gap: 15px;
     background: var(--wa-bg);
     position: relative;
-    /* Optional: WA Doodle Background */
-    background-image: url('data:image/svg+xml;utf8,<svg opacity="0.05" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="2" fill="%23ffffff"/></svg>');
+    background-image: url('data:image/svg+xml;utf8,<svg opacity="0.05" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="2" fill="%23000000"/></svg>');
     background-size: 30px;
+    transition: background-color 0.4s ease;
+}
+[data-theme="dark"] .chat-container {
+    background-image: url('data:image/svg+xml;utf8,<svg opacity="0.05" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="2" fill="%23ffffff"/></svg>');
 }
 
-/* Scrollbar styling for chat */
-.chat-container::-webkit-scrollbar {
-    width: 4px;
-}
+/* Scrollbar */
+.chat-container::-webkit-scrollbar { width: 4px; }
 .chat-container::-webkit-scrollbar-thumb {
-    background: rgba(255,255,255,0.1);
+    background: var(--border-color);
     border-radius: 4px;
 }
 
@@ -301,21 +399,17 @@ body {
     position: relative;
     line-height: 1.4;
     word-wrap: break-word;
+    box-shadow: 0 1px 0.5px rgba(0,0,0,0.13);
+    transition: background-color 0.4s ease, color 0.4s ease;
 }
 
-.message.user {
-    align-self: flex-end;
-}
-
+.message.user { align-self: flex-end; }
 .message.user .msg-content {
     background: var(--wa-msg-out);
     border-radius: 12px 0 12px 12px;
 }
 
-.message.bot {
-    align-self: flex-start;
-}
-
+.message.bot { align-self: flex-start; }
 .message.bot .msg-content {
     background: var(--wa-msg-in);
     border-radius: 0 12px 12px 12px;
@@ -329,12 +423,13 @@ body {
     background: var(--wa-msg-in);
     border-radius: 0 12px 12px 12px;
     width: fit-content;
+    box-shadow: 0 1px 0.5px rgba(0,0,0,0.13);
 }
 
 .dot {
     width: 6px;
     height: 6px;
-    background: #8696a0;
+    background: var(--wa-icon);
     border-radius: 50%;
     animation: typing 1.4s infinite ease-in-out both;
 }
@@ -343,14 +438,15 @@ body {
 .dot:nth-child(2) { animation-delay: -0.16s; }
 
 @keyframes typing {
-    0%, 80%, 100% { transform: scale(0); }
-    40% { transform: scale(1); }
+    0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+    40% { transform: scale(1); opacity: 1; }
 }
 
 /* WA Footer Input */
 .phone-footer {
     background: var(--wa-header);
     padding: 10px;
+    transition: background-color 0.4s ease;
 }
 
 .chat-input-bar {
@@ -360,20 +456,21 @@ body {
 }
 
 .chat-input-bar i {
-    color: #8696a0;
+    color: var(--wa-icon);
     font-size: 1.5rem;
 }
 
 .fake-input {
     flex: 1;
-    background: #2a3942;
+    background: var(--wa-input-bg);
     padding: 12px 15px;
     border-radius: 20px;
-    color: #8696a0;
+    color: var(--wa-icon);
     font-size: 0.95rem;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    transition: background-color 0.4s ease;
 }
 
 .send-btn {
@@ -392,31 +489,88 @@ body {
 }
 
 /* =========================================================
-   RESPONSIVE (Mobile)
+   RESPONSIVE (Mobile App-like Experience)
    ========================================================= */
 @media (max-width: 992px) {
-    .layout-wrapper {
-        flex-direction: column;
-    }
-    
     .docs-panel {
         width: 100%;
-        padding: 40px 20px;
+        padding: 40px 20px 80px; /* Extra padding bottom for scrolling */
         border-right: none;
     }
     
-    .preview-panel {
-        width: 100%;
-        position: static;
-        height: auto;
-        padding: 40px 20px;
-        border-top: 1px solid var(--border-color);
-        background: var(--bg-main);
+    .mobile-overlay {
+        display: block;
+        position: fixed;
+        inset: 0;
+        background: rgba(0,0,0,0.5);
+        backdrop-filter: blur(2px);
+        z-index: 90;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.3s ease;
     }
-    
+
+    /* Make preview panel a full-screen invisible wrapper */
+    .preview-panel {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100vw;
+        height: 100vh;
+        background: transparent;
+        z-index: 100;
+        pointer-events: none; /* Ignore clicks when closed */
+        align-items: center;
+        justify-content: flex-end; /* Align phone to bottom */
+    }
+
+    /* Bottom Sheet Style Phone */
     .phone-mockup {
         width: 100%;
-        max-width: 400px;
-        height: 600px;
+        max-width: 100%;
+        height: 85vh; /* Takes 85% of screen height */
+        border-radius: 24px 24px 0 0;
+        border: none;
+        border-top: 1px solid var(--border-color);
+        transform: translateY(100%); /* Hidden below */
+        transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.1); /* Spring effect */
+        pointer-events: auto; /* Catch clicks on the phone */
+    }
+    
+    /* Remove notch on mobile bottom sheet */
+    .phone-mockup::before { display: none; }
+
+    /* Close Button inside phone header area */
+    .close-mockup-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: var(--wa-header);
+        border: none;
+        width: 100%;
+        padding: 10px;
+        color: var(--wa-icon);
+        font-size: 2rem;
+        cursor: pointer;
+        border-radius: 24px 24px 0 0;
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    /* State Classes for when Mockup is Open */
+    body.mockup-open {
+        overflow: hidden; /* Prevent scrolling body */
+    }
+
+    body.mockup-open .mobile-overlay {
+        opacity: 1;
+        pointer-events: auto;
+    }
+
+    body.mockup-open .preview-panel {
+        pointer-events: auto; /* Catch clicks on the wrapper (overlay) */
+    }
+
+    body.mockup-open .phone-mockup {
+        transform: translateY(0); /* Slide up */
     }
 }

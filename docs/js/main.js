@@ -1,6 +1,22 @@
 document.addEventListener('DOMContentLoaded', () => {
 
-    // Simulación de interacciones por comando
+    // --- 1. Theme Management ---
+    const themeToggle = document.getElementById('themeToggle');
+    const rootElement = document.documentElement;
+
+    // Load saved theme
+    const savedTheme = localStorage.getItem('bot-theme') || 'dark';
+    rootElement.setAttribute('data-theme', savedTheme);
+
+    themeToggle.addEventListener('click', () => {
+        const currentTheme = rootElement.getAttribute('data-theme');
+        const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+        
+        rootElement.setAttribute('data-theme', newTheme);
+        localStorage.setItem('bot-theme', newTheme);
+    });
+
+    // --- 2. Simulación de Chat ---
     const commandInteractions = {
         'downloads': [
             { role: 'user', text: 'Descarga este video de tiktok: https://vm.tiktok.com/ZM...' },
@@ -79,35 +95,31 @@ document.addEventListener('DOMContentLoaded', () => {
     const fakeInput = document.getElementById('fake-input');
     const botStatus = document.getElementById('bot-status');
     const sendIcon = document.getElementById('send-icon');
+    
+    // Elementos Mobile
+    const mobileOverlay = document.getElementById('mobileOverlay');
+    const closeMockupBtn = document.getElementById('closeMockupBtn');
 
-    // Estado para limpiar timeouts previos
     let currentSimulationTimeouts = [];
 
     function clearSimulation() {
-        // Limpiar timeouts
         currentSimulationTimeouts.forEach(clearTimeout);
         currentSimulationTimeouts = [];
         
-        // Limpiar chat
         chatContainer.innerHTML = '';
         fakeInput.textContent = 'Escribe un mensaje...';
-        fakeInput.style.color = '#8696a0';
+        fakeInput.style.color = 'var(--wa-icon)';
         botStatus.textContent = 'en línea';
-        botStatus.style.color = '#8696a0';
+        botStatus.style.color = 'var(--wa-icon)';
         sendIcon.className = 'bx bxs-microphone';
     }
 
     function addMessage(role, text) {
         const msgDiv = document.createElement('div');
         msgDiv.className = `message ${role}`;
-        
-        // Convertir saltos de línea a <br>
         const formattedText = text.replace(/\n/g, '<br>');
-        
         msgDiv.innerHTML = `<div class="msg-content">${formattedText}</div>`;
         chatContainer.appendChild(msgDiv);
-        
-        // Scroll hacia abajo
         chatContainer.scrollTop = chatContainer.scrollHeight;
     }
 
@@ -135,66 +147,94 @@ document.addEventListener('DOMContentLoaded', () => {
         const sequence = commandInteractions[cmdId];
         if (!sequence) return;
 
-        // Reset UI de comandos
         commandItems.forEach(i => i.classList.remove('active'));
         document.querySelector(`.command-item[data-cmd="${cmdId}"]`).classList.add('active');
 
-        // Buscar el mensaje del usuario
         const userAction = sequence.find(item => item.role === 'user');
         if (!userAction) return;
 
-        // 1. Simular tipeo en la barra inferior (fake)
-        fakeInput.style.color = '#e9edef';
+        fakeInput.style.color = 'var(--wa-text)';
         fakeInput.textContent = userAction.text;
         sendIcon.className = 'bx bxs-send';
 
-        // 2. Enviar mensaje del usuario después de 600ms
         currentSimulationTimeouts.push(setTimeout(() => {
             fakeInput.textContent = 'Escribe un mensaje...';
-            fakeInput.style.color = '#8696a0';
+            fakeInput.style.color = 'var(--wa-icon)';
             sendIcon.className = 'bx bxs-microphone';
             addMessage('user', userAction.text);
             
-            // 3. Procesar las respuestas del bot
             const botResponses = sequence.filter(item => item.role === 'bot');
-            
-            let accumulatedDelay = 500; // Iniciar un poco después del msg del user
+            let accumulatedDelay = 500;
             
             botResponses.forEach((response, index) => {
-                
-                // Mostrar "escribiendo..." antes de la respuesta
                 currentSimulationTimeouts.push(setTimeout(() => {
                     const typingIndicator = showTyping();
                     
-                    // Quitar typing y mostrar mensaje
                     currentSimulationTimeouts.push(setTimeout(() => {
                         typingIndicator.remove();
                         addMessage('bot', response.text);
                         
-                        // Si es el último mensaje, resetear estado
                         if (index === botResponses.length - 1) {
                             botStatus.textContent = 'en línea';
-                            botStatus.style.color = '#8696a0';
+                            botStatus.style.color = 'var(--wa-icon)';
                         }
                     }, response.delay || 1500));
-
                 }, accumulatedDelay));
 
-                accumulatedDelay += (response.delay || 1500) + 800; // Sumar tiempo para el siguiente
+                accumulatedDelay += (response.delay || 1500) + 800;
             });
-
         }, 600));
     }
 
-    // Event Listeners
+    // Eventos Click en Comandos
     commandItems.forEach(item => {
-        item.addEventListener('click', () => {
+        item.addEventListener('click', (e) => {
+            // Ignorar click si fue en el botón de copiar
+            if(e.target.closest('.copy-btn')) return;
+
             const cmd = item.getAttribute('data-cmd');
             runSimulation(cmd);
             
-            // Scroll en móviles al panel derecho (Mockup)
+            // Lógica Mobile: Abrir el Bottom Sheet
             if (window.innerWidth <= 992) {
-                document.querySelector('.preview-panel').scrollIntoView({ behavior: 'smooth' });
+                document.body.classList.add('mockup-open');
+            }
+        });
+    });
+
+    // --- 3. Mobile Bottom Sheet Logic ---
+    function closeMobileMockup() {
+        document.body.classList.remove('mockup-open');
+    }
+
+    closeMockupBtn.addEventListener('click', closeMobileMockup);
+    mobileOverlay.addEventListener('click', closeMobileMockup);
+
+    // --- 4. Copy to Clipboard Logic ---
+    const copyButtons = document.querySelectorAll('.copy-btn');
+    
+    copyButtons.forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const item = e.target.closest('.command-item');
+            const cmdId = item.getAttribute('data-cmd');
+            
+            // Obtenemos el texto del usuario desde la simulación
+            const sequence = commandInteractions[cmdId];
+            if(sequence) {
+                const userAction = sequence.find(i => i.role === 'user');
+                if(userAction) {
+                    navigator.clipboard.writeText(userAction.text).then(() => {
+                        // Feedback visual
+                        const icon = btn.querySelector('i');
+                        icon.className = 'bx bx-check';
+                        btn.classList.add('copied');
+                        
+                        setTimeout(() => {
+                            icon.className = 'bx bx-copy';
+                            btn.classList.remove('copied');
+                        }, 2000);
+                    });
+                }
             }
         });
     });

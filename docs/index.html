@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="es" data-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -8,7 +8,6 @@
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <!-- Inter for UI, Fira Code for commands -->
     <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
     <!-- Icons -->
     <link href='https://unpkg.com/boxicons@2.1.4/css/boxicons.min.css' rel='stylesheet'>
@@ -22,107 +21,156 @@
         <!-- Left Panel: Documentation & Commands -->
         <main class="docs-panel">
             <header class="docs-header">
-                <div class="logo-wrapper">
-                    <img src="media/logo.png" alt="Logo" class="bot-logo">
-                    <div class="status-indicator"></div>
+                <div class="header-top">
+                    <div class="logo-wrapper">
+                        <img src="media/logo.jpg" alt="Logo" class="bot-logo">
+                        <div class="status-indicator"></div>
+                    </div>
+                    
+                    <!-- Theme Toggle Switch -->
+                    <button id="themeToggle" class="theme-btn" aria-label="Cambiar tema">
+                        <i class='bx bx-sun icon-sun'></i>
+                        <i class='bx bx-moon icon-moon'></i>
+                    </button>
                 </div>
+                
                 <h1>Bot Reference</h1>
                 <p>Documentación técnica y listado de comandos interactivos. Haz clic en un comando para ver su funcionamiento en vivo.</p>
             </header>
 
             <nav class="commands-nav">
                 
-                <!-- Category 1 -->
                 <div class="category">
                     <h2 class="category-title">Multimedia & Descargas</h2>
                     <ul class="command-list">
                         <li class="command-item" data-cmd="downloads">
-                            <span class="cmd-name">downloads.js</span>
-                            <span class="cmd-desc">Extrae multimedia de TikTok/IG.</span>
+                            <div class="cmd-info">
+                                <span class="cmd-name">downloads.js</span>
+                                <span class="cmd-desc">Extrae multimedia de TikTok/IG.</span>
+                            </div>
+                            <button class="copy-btn" title="Copiar ejemplo"><i class='bx bx-copy'></i></button>
                         </li>
                         <li class="command-item" data-cmd="play">
-                            <span class="cmd-name">play.js</span>
-                            <span class="cmd-desc">Descarga desde YouTube.</span>
+                            <div class="cmd-info">
+                                <span class="cmd-name">play.js</span>
+                                <span class="cmd-desc">Descarga desde YouTube.</span>
+                            </div>
+                            <button class="copy-btn" title="Copiar ejemplo"><i class='bx bx-copy'></i></button>
                         </li>
                         <li class="command-item" data-cmd="tomp3">
-                            <span class="cmd-name">tomp3.js</span>
-                            <span class="cmd-desc">Extrae audio de video.</span>
+                            <div class="cmd-info">
+                                <span class="cmd-name">tomp3.js</span>
+                                <span class="cmd-desc">Extrae audio de video.</span>
+                            </div>
+                            <button class="copy-btn" title="Copiar ejemplo"><i class='bx bx-copy'></i></button>
                         </li>
                         <li class="command-item" data-cmd="webscreenshot">
-                            <span class="cmd-name">web_screenshot.js</span>
-                            <span class="cmd-desc">Captura de pantalla web.</span>
+                            <div class="cmd-info">
+                                <span class="cmd-name">web_screenshot.js</span>
+                                <span class="cmd-desc">Captura de pantalla web.</span>
+                            </div>
+                            <button class="copy-btn" title="Copiar ejemplo"><i class='bx bx-copy'></i></button>
                         </li>
                     </ul>
                 </div>
 
-                <!-- Category 2 -->
                 <div class="category">
                     <h2 class="category-title">Utilidades y Herramientas</h2>
                     <ul class="command-list">
                         <li class="command-item" data-cmd="lyrics">
-                            <span class="cmd-name">lyrics.js</span>
-                            <span class="cmd-desc">Busca letras de canciones.</span>
+                            <div class="cmd-info">
+                                <span class="cmd-name">lyrics.js</span>
+                                <span class="cmd-desc">Busca letras de canciones.</span>
+                            </div>
+                            <button class="copy-btn" title="Copiar ejemplo"><i class='bx bx-copy'></i></button>
                         </li>
                         <li class="command-item" data-cmd="translate">
-                            <span class="cmd-name">translate.js</span>
-                            <span class="cmd-desc">Traductor rápido.</span>
+                            <div class="cmd-info">
+                                <span class="cmd-name">translate.js</span>
+                                <span class="cmd-desc">Traductor rápido.</span>
+                            </div>
+                            <button class="copy-btn" title="Copiar ejemplo"><i class='bx bx-copy'></i></button>
                         </li>
                         <li class="command-item" data-cmd="qr">
-                            <span class="cmd-name">qr.js</span>
-                            <span class="cmd-desc">Crea un código QR.</span>
+                            <div class="cmd-info">
+                                <span class="cmd-name">qr.js</span>
+                                <span class="cmd-desc">Crea un código QR.</span>
+                            </div>
+                            <button class="copy-btn" title="Copiar ejemplo"><i class='bx bx-copy'></i></button>
                         </li>
                         <li class="command-item" data-cmd="readqr">
-                            <span class="cmd-name">readqr.js</span>
-                            <span class="cmd-desc">Lee un código QR.</span>
+                            <div class="cmd-info">
+                                <span class="cmd-name">readqr.js</span>
+                                <span class="cmd-desc">Lee un código QR.</span>
+                            </div>
+                            <button class="copy-btn" title="Copiar ejemplo"><i class='bx bx-copy'></i></button>
                         </li>
                         <li class="command-item" data-cmd="remind">
-                            <span class="cmd-name">remind.js</span>
-                            <span class="cmd-desc">Agenda recordatorios.</span>
+                            <div class="cmd-info">
+                                <span class="cmd-name">remind.js</span>
+                                <span class="cmd-desc">Agenda recordatorios.</span>
+                            </div>
+                            <button class="copy-btn" title="Copiar ejemplo"><i class='bx bx-copy'></i></button>
                         </li>
                     </ul>
                 </div>
 
-                <!-- Category 3 -->
                 <div class="category">
                     <h2 class="category-title">Stickers</h2>
                     <ul class="command-list">
                         <li class="command-item" data-cmd="sticker">
-                            <span class="cmd-name">sticker.js</span>
-                            <span class="cmd-desc">Genera stickers de imagen/video.</span>
+                            <div class="cmd-info">
+                                <span class="cmd-name">sticker.js</span>
+                                <span class="cmd-desc">Genera stickers de imagen/video.</span>
+                            </div>
+                            <button class="copy-btn" title="Copiar ejemplo"><i class='bx bx-copy'></i></button>
                         </li>
                         <li class="command-item" data-cmd="stickerimg">
-                            <span class="cmd-name">sticker_converter.js</span>
-                            <span class="cmd-desc">Convierte sticker a imagen.</span>
+                            <div class="cmd-info">
+                                <span class="cmd-name">sticker_converter.js</span>
+                                <span class="cmd-desc">Convierte sticker a imagen.</span>
+                            </div>
+                            <button class="copy-btn" title="Copiar ejemplo"><i class='bx bx-copy'></i></button>
                         </li>
                     </ul>
                 </div>
 
-                <!-- Category 4 -->
                 <div class="category">
                     <h2 class="category-title">Gestión de Grupos</h2>
                     <ul class="command-list">
                         <li class="command-item" data-cmd="tagall">
-                            <span class="cmd-name">tagall.js</span>
-                            <span class="cmd-desc">Mención masiva en grupos.</span>
+                            <div class="cmd-info">
+                                <span class="cmd-name">tagall.js</span>
+                                <span class="cmd-desc">Mención masiva en grupos.</span>
+                            </div>
+                            <button class="copy-btn" title="Copiar ejemplo"><i class='bx bx-copy'></i></button>
                         </li>
                         <li class="command-item" data-cmd="grupo">
-                            <span class="cmd-name">grupo.js</span>
-                            <span class="cmd-desc">Abre/cierra el bot en grupos.</span>
+                            <div class="cmd-info">
+                                <span class="cmd-name">grupo.js</span>
+                                <span class="cmd-desc">Abre/cierra el bot en grupos.</span>
+                            </div>
+                            <button class="copy-btn" title="Copiar ejemplo"><i class='bx bx-copy'></i></button>
                         </li>
                         <li class="command-item" data-cmd="warn">
-                            <span class="cmd-name">warn.js</span>
-                            <span class="cmd-desc">Advierte a un miembro.</span>
+                            <div class="cmd-info">
+                                <span class="cmd-name">warn.js</span>
+                                <span class="cmd-desc">Advierte a un miembro.</span>
+                            </div>
+                            <button class="copy-btn" title="Copiar ejemplo"><i class='bx bx-copy'></i></button>
                         </li>
                     </ul>
                 </div>
 
-                <!-- Category 5 -->
                 <div class="category">
                     <h2 class="category-title">Sistema</h2>
                     <ul class="command-list">
                         <li class="command-item" data-cmd="stats">
-                            <span class="cmd-name">stats.js</span>
-                            <span class="cmd-desc">Monitor de rendimiento VPS.</span>
+                            <div class="cmd-info">
+                                <span class="cmd-name">stats.js</span>
+                                <span class="cmd-desc">Monitor de rendimiento VPS.</span>
+                            </div>
+                            <button class="copy-btn" title="Copiar ejemplo"><i class='bx bx-copy'></i></button>
                         </li>
                     </ul>
                 </div>
@@ -130,25 +178,28 @@
             </nav>
             
             <footer class="docs-footer">
-                <p>&copy; 2026 Bot Platform. v1.0.0</p>
+                <p>&copy; 2026 Bot Platform. v1.1.0</p>
             </footer>
         </main>
 
-        <!-- Right Panel: Live Preview -->
-        <aside class="preview-panel">
-            
-            <!-- Mobile Toggle Hint -->
-            <div class="mobile-preview-hint">
-                <i class='bx bx-mobile-alt'></i> Toca un comando para simular
-            </div>
+        <!-- Mobile Overlay (Darkens background when phone is open) -->
+        <div class="mobile-overlay" id="mobileOverlay"></div>
 
+        <!-- Right Panel: Live Preview -->
+        <aside class="preview-panel" id="previewPanel">
+            
             <!-- Phone Mockup -->
             <div class="phone-mockup">
                 
+                <!-- Close button for mobile -->
+                <button class="close-mockup-btn" id="closeMockupBtn">
+                    <i class='bx bx-chevron-down'></i>
+                </button>
+
                 <div class="phone-header">
                     <div class="phone-contact">
                         <div class="avatar-container">
-                            <img src="media/logo.png" alt="Bot">
+                            <img src="media/logo.jpg" alt="Bot">
                         </div>
                         <div class="contact-info">
                             <h3>Bot System</h3>
@@ -163,7 +214,6 @@
                 </div>
 
                 <div class="chat-container" id="chat-container">
-                    <!-- Default state -->
                     <div class="message bot">
                         <div class="msg-content">👋 ¡Hola! Soy el sistema automatizado. Haz clic en un comando del menú lateral para ver cómo funciono.</div>
                     </div>
