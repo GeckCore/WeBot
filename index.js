@@ -14,7 +14,8 @@ global.db = low(adapter);
 global.db.defaults({ 
     users: {}, 
     chats: {}, 
-    settings: { grupos: true, autosticker: false } 
+    settings: { grupos: true, autosticker: false },
+    vigilancia: {} // Almacena JID: { logs: [] }
 }).write();
 
 console.log('[INFO] Base de datos JSON cargada y lista.');
@@ -24,7 +25,8 @@ console.log('[INFO] Base de datos JSON cargada y lista.');
 // ==========================================
 global.shadowTargets = {}; 
 global.sniperTargets = {}; 
-global.lastMsgTimestamps = {}; // Almacena cuándo enviaste tú el mensaje
+global.lastMsgTimestamps = {}; 
+global.sesionesVigilia = {}; // Rastreador temporal de sesiones online
 global.plugins = [];
 
 // --- OPTIMIZACIÓN DE ARRANQUE: BINARIOS ---
@@ -74,13 +76,38 @@ async function iniciarBot() {
     sock.ev.on('creds.update', saveCreds);
 
     // ==========================================
-    //      CORE: PRESENCE (SHADOW & SNIPER)
+    //      CORE: PRESENCE (SHADOW, SNIPER & VIGILANCIA)
     // ==========================================
     sock.ev.on('presence.update', async ({ id, presences }) => {
         const target = id;
         const status = presences[target]?.lastKnownPresence;
+        const ahora = Date.now();
 
-        // 1. Lógica Shadow (Mímica de escritura/audio)
+        // --- LÓGICA DE VIGILANCIA (Centinela) ---
+        if (global.db.data.vigilancia[target]) {
+            if (status === 'available') {
+                // Inicia sesión
+                global.sesionesVigilia[target] = ahora;
+            } else if (status === 'unavailable' || !status) {
+                // Finaliza sesión
+                const inicio = global.sesionesVigilia[target];
+                if (inicio) {
+                    const duracion = ahora - inicio;
+                    if (!global.db.data.vigilancia[target].logs) global.db.data.vigilancia[target].logs = [];
+                    
+                    global.db.data.vigilancia[target].logs.push({
+                        inicio,
+                        fin: ahora,
+                        duracion
+                    });
+                    
+                    global.db.write();
+                    delete global.sesionesVigilia[target];
+                }
+            }
+        }
+
+        // --- LÓGICA SHADOW (Mímica) ---
         if (global.shadowTargets[target]) {
             if (status === 'composing' || status === 'recording') {
                 await sock.sendPresenceUpdate(status, target);
@@ -89,7 +116,7 @@ async function iniciarBot() {
             }
         }
 
-        // 2. Lógica Sniper (Dime?)
+        // --- LÓGICA SNIPER (Dime?) ---
         if (global.sniperTargets[target] && (status === 'composing' || status === 'recording')) {
             try {
                 await new Promise(r => setTimeout(r, 700));
@@ -112,12 +139,10 @@ async function iniciarBot() {
         for (const { key, receipt } of updates) {
             const remitente = key.remoteJid;
             
-            // Si el modo shadow está activo y el mensaje ha sido LEÍDO (doble check azul)
             if (global.shadowTargets[remitente] && receipt.readTimestamp && !key.fromMe) {
                 const sendTime = global.lastMsgTimestamps[remitente];
                 
                 if (sendTime) {
-                    // Diferencia real entre el envío y la lectura
                     const diff = receipt.readTimestamp - sendTime;
                     const segundos = diff; 
                     
@@ -129,7 +154,6 @@ async function iniciarBot() {
                         text: `👁️ Tardaste ${tiempoTexto} en contestar.` 
                     });
                     
-                    // Limpiar el registro para no repetir por el mismo mensaje
                     delete global.lastMsgTimestamps[remitente];
                 }
             }
@@ -163,7 +187,6 @@ async function iniciarBot() {
         global.db.data = global.db.getState();
         const remitente = msg.key.remoteJid;
         
-        // --- REGISTRO DE TIEMPO (Solo para Shadow activo) ---
         if (msg.key.fromMe && global.shadowTargets[remitente]) {
             global.lastMsgTimestamps[remitente] = msg.messageTimestamp;
         }
