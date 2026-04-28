@@ -208,7 +208,8 @@ body {
     display: none;
     position: absolute;
     top: 100%;
-    left: 0;
+    left: auto;
+    right: 0;
     min-width: 200px;
     background-color: var(--bg-panel);
     border: 1px solid var(--border-color);
@@ -394,9 +395,8 @@ body {
 }
 
 .business-badge {
-    position: absolute;
-    top: 20px;
-    right: 20px;
+    display: inline-block;
+    margin-bottom: 15px;
     background: var(--accent-glow);
     color: var(--accent);
     padding: 4px 12px;
