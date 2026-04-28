@@ -4,7 +4,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const themeToggle = document.getElementById('themeToggle');
     const rootElement = document.documentElement;
 
-    // Load saved theme
     const savedTheme = localStorage.getItem('bot-theme') || 'dark';
     rootElement.setAttribute('data-theme', savedTheme);
 
@@ -16,7 +15,39 @@ document.addEventListener('DOMContentLoaded', () => {
         localStorage.setItem('bot-theme', newTheme);
     });
 
-    // --- 2. Simulación de Chat ---
+    // --- 2. Tab Navigation Logic ---
+    const navTabs = document.querySelectorAll('.nav-tab[data-target]');
+    const tabPanes = document.querySelectorAll('.tab-pane');
+
+    navTabs.forEach(tab => {
+        tab.addEventListener('click', () => {
+            // Eliminar activo de todas las tabs (que no sean dropdown)
+            navTabs.forEach(t => t.classList.remove('active'));
+            // Ocultar todos los panes
+            tabPanes.forEach(p => {
+                p.classList.remove('active');
+                p.classList.add('hidden');
+            });
+
+            // Activar tab actual
+            tab.classList.add('active');
+            // Mostrar pane destino
+            const targetId = tab.getAttribute('data-target');
+            const targetPane = document.getElementById(targetId);
+            targetPane.classList.remove('hidden');
+            targetPane.classList.add('active');
+            
+            // Si vamos a la pestaña About, simular un mensaje de empresa en el teléfono
+            if(targetId === 'about-section') {
+                runBusinessSimulation();
+            } else {
+                clearSimulation();
+                addMessage('bot', '👋 ¡Hola de nuevo! Explora la lista de comandos a la izquierda.');
+            }
+        });
+    });
+
+    // --- 3. Simulación de Chat ---
     const commandInteractions = {
         'downloads': [
             { role: 'user', text: 'Descarga este video de tiktok: https://vm.tiktok.com/ZM...' },
@@ -96,7 +127,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const botStatus = document.getElementById('bot-status');
     const sendIcon = document.getElementById('send-icon');
     
-    // Elementos Mobile
     const mobileOverlay = document.getElementById('mobileOverlay');
     const closeMockupBtn = document.getElementById('closeMockupBtn');
 
@@ -141,15 +171,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return typingDiv;
     }
 
-    function runSimulation(cmdId) {
-        clearSimulation();
-        
-        const sequence = commandInteractions[cmdId];
-        if (!sequence) return;
-
-        commandItems.forEach(i => i.classList.remove('active'));
-        document.querySelector(`.command-item[data-cmd="${cmdId}"]`).classList.add('active');
-
+    function executeSequence(sequence) {
         const userAction = sequence.find(item => item.role === 'user');
         if (!userAction) return;
 
@@ -186,23 +208,43 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 600));
     }
 
+    function runSimulation(cmdId) {
+        clearSimulation();
+        const sequence = commandInteractions[cmdId];
+        if (!sequence) return;
+
+        commandItems.forEach(i => i.classList.remove('active'));
+        document.querySelector(`.command-item[data-cmd="${cmdId}"]`).classList.add('active');
+
+        executeSequence(sequence);
+    }
+
+    // Special Simulation for About Page
+    function runBusinessSimulation() {
+        clearSimulation();
+        const sequence = [
+            { role: 'user', text: 'Hola, tengo una tienda online y me gustaría automatizar mis pedidos por WhatsApp.' },
+            { role: 'bot', text: '¡Hola! Qué excelente iniciativa. Puedo desarrollar un bot que se conecte directamente al inventario de tu tienda.', delay: 1800 },
+            { role: 'bot', text: '¿Te gustaría agendar una reunión para que veamos tu caso en detalle?', delay: 2000 }
+        ];
+        executeSequence(sequence);
+    }
+
     // Eventos Click en Comandos
     commandItems.forEach(item => {
         item.addEventListener('click', (e) => {
-            // Ignorar click si fue en el botón de copiar
             if(e.target.closest('.copy-btn')) return;
 
             const cmd = item.getAttribute('data-cmd');
             runSimulation(cmd);
             
-            // Lógica Mobile: Abrir el Bottom Sheet
             if (window.innerWidth <= 992) {
                 document.body.classList.add('mockup-open');
             }
         });
     });
 
-    // --- 3. Mobile Bottom Sheet Logic ---
+    // --- 4. Mobile Bottom Sheet Logic ---
     function closeMobileMockup() {
         document.body.classList.remove('mockup-open');
     }
@@ -210,25 +252,21 @@ document.addEventListener('DOMContentLoaded', () => {
     closeMockupBtn.addEventListener('click', closeMobileMockup);
     mobileOverlay.addEventListener('click', closeMobileMockup);
 
-    // --- 4. Copy to Clipboard Logic ---
+    // --- 5. Copy to Clipboard Logic ---
     const copyButtons = document.querySelectorAll('.copy-btn');
-    
     copyButtons.forEach(btn => {
         btn.addEventListener('click', (e) => {
             const item = e.target.closest('.command-item');
             const cmdId = item.getAttribute('data-cmd');
             
-            // Obtenemos el texto del usuario desde la simulación
             const sequence = commandInteractions[cmdId];
             if(sequence) {
                 const userAction = sequence.find(i => i.role === 'user');
                 if(userAction) {
                     navigator.clipboard.writeText(userAction.text).then(() => {
-                        // Feedback visual
                         const icon = btn.querySelector('i');
                         icon.className = 'bx bx-check';
                         btn.classList.add('copied');
-                        
                         setTimeout(() => {
                             icon.className = 'bx bx-copy';
                             btn.classList.remove('copied');
