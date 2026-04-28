@@ -1,13 +1,13 @@
 export default {
     name: 'centinela_monitor',
-    match: (text) => /^\.(vigile|viewvigile)/i.test(text),
+    match: (text) => /^\.(observar|viewvigile)/i.test(text),
     execute: async ({ sock, remitente, msg, textoLimpio }) => {
         
         const command = textoLimpio.split(' ')[0].toLowerCase();
         global.db.data.vigilancia = global.db.data.vigilancia || {};
 
         // --- COMANDO .vigile ---
-        if (command === '.vigile') {
+        if (command === '.observar') {
             try { await sock.sendMessage(remitente, { delete: msg.key }); } catch (e) {}
 
             if (global.db.data.vigilancia[remitente]) {
