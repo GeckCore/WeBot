@@ -18,6 +18,9 @@ global.db.defaults({
     vigilancia: {} // Almacena JID: { logs: [] }
 }).write();
 
+// 🔴 BLINDAJE DE MEMORIA: Forzamos la carga de datos al arrancar
+global.db.data = global.db.getState();
+
 console.log('[INFO] Base de datos JSON cargada y lista.');
 
 // ==========================================
@@ -29,6 +32,7 @@ global.lastMsgTimestamps = {};
 global.sesionesVigilia = {}; 
 global.plugins = [];
 
+// --- OPTIMIZACIÓN DE ARRANQUE: BINARIOS ---
 const isWindows = process.platform === 'win32';
 const binarios = ['yt-dlp', 'ffmpeg', 'webpmux']; 
 
@@ -36,11 +40,14 @@ binarios.forEach(bin => {
     const fileName = isWindows ? `${bin}.exe` : bin;
     const binPath = path.join(__dirname, fileName);
     if (fs.existsSync(binPath) && !isWindows) {
-        try { fs.chmodSync(binPath, '755'); } catch (e) {}
+        try { 
+            fs.chmodSync(binPath, '755'); 
+        } catch (e) {}
     }
 });
 
 async function iniciarBot() {
+    // --- CARGA DINÁMICA DE PLUGINS ---
     const pluginsDir = path.join(__dirname, 'plugins');
     if (!fs.existsSync(pluginsDir)) fs.mkdirSync(pluginsDir);
     
@@ -71,14 +78,17 @@ async function iniciarBot() {
 
     sock.ev.on('creds.update', saveCreds);
 
+    // ==========================================
+    //      CORE: PRESENCE (SHADOW, SNIPER & VIGILANCIA)
+    // ==========================================
     sock.ev.on('presence.update', async ({ id, presences }) => {
         const target = id;
         const status = presences[target]?.lastKnownPresence;
         const ahora = Date.now();
 
         // --- LÓGICA DE VIGILANCIA (Centinela) ---
-        // Ahora sí detectará 'available' (En línea) gracias al presenceSubscribe
-        if (global.db.data.vigilancia[target]) {
+        // Usamos optional chaining (?.) por seguridad extrema
+        if (global.db.data?.vigilancia?.[target]) {
             if (status === 'available') {
                 if (!global.sesionesVigilia[target]) {
                     global.sesionesVigilia[target] = ahora;
@@ -88,8 +98,7 @@ async function iniciarBot() {
                 const inicio = global.sesionesVigilia[target];
                 if (inicio) {
                     const duracion = ahora - inicio;
-                    // Solo guardamos si estuvo más de 3 segundos (filtra micro-conexiones)
-                    if (duracion > 3000) {
+                    if (duracion > 3000) { // Ignoramos micro-desconexiones (<3s)
                         if (!global.db.data.vigilancia[target].logs) global.db.data.vigilancia[target].logs = [];
                         global.db.data.vigilancia[target].logs.push({ inicio, fin: ahora, duracion });
                         global.db.write();
@@ -120,6 +129,9 @@ async function iniciarBot() {
         }
     });
 
+    // ==========================================
+    //      CORE: RECEIPT TRACKER (VISTO)
+    // ==========================================
     sock.ev.on('message-receipt.update', async (updates) => {
         for (const { key, receipt } of updates) {
             const remitente = key.remoteJid;
@@ -138,13 +150,17 @@ async function iniciarBot() {
     sock.ev.on('connection.update', async (update) => {
         const { connection, qr } = update;
         if (qr) qrcode.generate(qr, { small: true });
+        
         if (connection === 'close') {
             iniciarBot();
         } else if (connection === 'open') {
             console.log(`[INFO] ¡Conectado! (${global.plugins.length} plugins cargados)`);
             
-            // RE-SUSCRIPCIÓN MASIVA: Al conectar, el bot vuelve a mirar a todos los vigilados
-            const objetivos = Object.keys(global.db.data.vigilancia || {});
+            // RE-SUSCRIPCIÓN DE VIGILANCIA
+            // Extraemos los objetivos directamente del estado limpio
+            const dataVigilancia = global.db.data?.vigilancia || {};
+            const objetivos = Object.keys(dataVigilancia);
+            
             for (const target of objetivos) {
                 try {
                     await sock.presenceSubscribe(target);
@@ -168,6 +184,7 @@ async function iniciarBot() {
         const msg = m.messages[0];
         if (!msg.message || msg.key.remoteJid === 'status@broadcast') return;
 
+        // Actualizamos estado db global si hay cambios desde plugins
         global.db.data = global.db.getState();
         const remitente = msg.key.remoteJid;
         
@@ -208,7 +225,7 @@ async function iniciarBot() {
             if (plugin.match && plugin.match(textoLimpio, ctx)) {
                 try {
                     await plugin.execute(ctx);
-                    global.db.write();
+                    global.db.write(); // Guardamos db tras ejecución de plugin
                 } catch (err) {
                     console.error(`Error en plugin ${plugin.name}:`, err);
                 }
