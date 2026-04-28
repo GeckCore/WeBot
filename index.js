@@ -26,10 +26,9 @@ console.log('[INFO] Base de datos JSON cargada y lista.');
 global.shadowTargets = {}; 
 global.sniperTargets = {}; 
 global.lastMsgTimestamps = {}; 
-global.sesionesVigilia = {}; // Rastreador temporal de sesiones online
+global.sesionesVigilia = {}; 
 global.plugins = [];
 
-// --- OPTIMIZACIÓN DE ARRANQUE: BINARIOS ---
 const isWindows = process.platform === 'win32';
 const binarios = ['yt-dlp', 'ffmpeg', 'webpmux']; 
 
@@ -37,14 +36,11 @@ binarios.forEach(bin => {
     const fileName = isWindows ? `${bin}.exe` : bin;
     const binPath = path.join(__dirname, fileName);
     if (fs.existsSync(binPath) && !isWindows) {
-        try { 
-            fs.chmodSync(binPath, '755'); 
-        } catch (e) {}
+        try { fs.chmodSync(binPath, '755'); } catch (e) {}
     }
 });
 
 async function iniciarBot() {
-    // --- CARGA DINÁMICA DE PLUGINS ---
     const pluginsDir = path.join(__dirname, 'plugins');
     if (!fs.existsSync(pluginsDir)) fs.mkdirSync(pluginsDir);
     
@@ -75,34 +71,31 @@ async function iniciarBot() {
 
     sock.ev.on('creds.update', saveCreds);
 
-    // ==========================================
-    //      CORE: PRESENCE (SHADOW, SNIPER & VIGILANCIA)
-    // ==========================================
     sock.ev.on('presence.update', async ({ id, presences }) => {
         const target = id;
         const status = presences[target]?.lastKnownPresence;
         const ahora = Date.now();
 
         // --- LÓGICA DE VIGILANCIA (Centinela) ---
+        // Ahora sí detectará 'available' (En línea) gracias al presenceSubscribe
         if (global.db.data.vigilancia[target]) {
             if (status === 'available') {
-                // Inicia sesión
-                global.sesionesVigilia[target] = ahora;
-            } else if (status === 'unavailable' || !status) {
-                // Finaliza sesión
+                if (!global.sesionesVigilia[target]) {
+                    global.sesionesVigilia[target] = ahora;
+                    console.log(`[VIGILANCIA] ${target.split('@')[0]} ESTÁ EN LÍNEA.`);
+                }
+            } else if (status === 'unavailable') {
                 const inicio = global.sesionesVigilia[target];
                 if (inicio) {
                     const duracion = ahora - inicio;
-                    if (!global.db.data.vigilancia[target].logs) global.db.data.vigilancia[target].logs = [];
-                    
-                    global.db.data.vigilancia[target].logs.push({
-                        inicio,
-                        fin: ahora,
-                        duracion
-                    });
-                    
-                    global.db.write();
+                    // Solo guardamos si estuvo más de 3 segundos (filtra micro-conexiones)
+                    if (duracion > 3000) {
+                        if (!global.db.data.vigilancia[target].logs) global.db.data.vigilancia[target].logs = [];
+                        global.db.data.vigilancia[target].logs.push({ inicio, fin: ahora, duracion });
+                        global.db.write();
+                    }
                     delete global.sesionesVigilia[target];
+                    console.log(`[VIGILANCIA] ${target.split('@')[0]} SE DESCONECTÓ. (${Math.floor(duracion/1000)}s)`);
                 }
             }
         }
@@ -121,52 +114,43 @@ async function iniciarBot() {
             try {
                 await new Promise(r => setTimeout(r, 700));
                 await sock.sendMessage(target, { text: 'Dime?' });
-
                 global.sniperTargets[target] = false; 
-                setTimeout(() => { 
-                    if (global.sniperTargets) global.sniperTargets[target] = true; 
-                }, 7000);
-            } catch (e) {
-                console.error("Error en Sniper Shot:", e);
-            }
+                setTimeout(() => { if (global.sniperTargets) global.sniperTargets[target] = true; }, 7000);
+            } catch (e) {}
         }
     });
 
-    // ==========================================
-    //      CORE: RECEIPT TRACKER (VISTO)
-    // ==========================================
     sock.ev.on('message-receipt.update', async (updates) => {
         for (const { key, receipt } of updates) {
             const remitente = key.remoteJid;
-            
             if (global.shadowTargets[remitente] && receipt.readTimestamp && !key.fromMe) {
                 const sendTime = global.lastMsgTimestamps[remitente];
-                
                 if (sendTime) {
                     const diff = receipt.readTimestamp - sendTime;
-                    const segundos = diff; 
-                    
-                    let tiempoTexto = segundos < 60 
-                        ? `${segundos} segundos` 
-                        : `${Math.floor(segundos / 60)} minutos y ${segundos % 60} segundos`;
-
-                    await sock.sendMessage(remitente, { 
-                        text: `👁️ Tardaste ${tiempoTexto} en contestar.` 
-                    });
-                    
+                    let tiempoTexto = diff < 60 ? `${diff} segundos` : `${Math.floor(diff / 60)} minutos y ${diff % 60} segundos`;
+                    await sock.sendMessage(remitente, { text: `👁️ Tardaste ${tiempoTexto} en contestar.` });
                     delete global.lastMsgTimestamps[remitente];
                 }
             }
         }
     });
 
-    sock.ev.on('connection.update', (update) => {
+    sock.ev.on('connection.update', async (update) => {
         const { connection, qr } = update;
         if (qr) qrcode.generate(qr, { small: true });
         if (connection === 'close') {
             iniciarBot();
         } else if (connection === 'open') {
             console.log(`[INFO] ¡Conectado! (${global.plugins.length} plugins cargados)`);
+            
+            // RE-SUSCRIPCIÓN MASIVA: Al conectar, el bot vuelve a mirar a todos los vigilados
+            const objetivos = Object.keys(global.db.data.vigilancia || {});
+            for (const target of objetivos) {
+                try {
+                    await sock.presenceSubscribe(target);
+                    console.log(`[CENTINELA] Re-suscrito a telemetría de: ${target.split('@')[0]}`);
+                } catch (e) {}
+            }
         }
     });
 
@@ -195,8 +179,7 @@ async function iniciarBot() {
         let buttonText = "";
         try {
             if (msg?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson) {
-                const params = JSON.parse(msg.message.interactiveResponseMessage.nativeFlowResponseMessage.paramsJson);
-                buttonText = params.id || "";
+                buttonText = JSON.parse(msg.message.interactiveResponseMessage.nativeFlowResponseMessage.paramsJson).id || "";
             }
         } catch (e) {}
         
