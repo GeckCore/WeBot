@@ -1,9 +1,10 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
-// Configura tu API Key aquí
-const genAI = new GoogleGenerativeAI("TU_API_KEY_AQUÍ");
+// NUNCA pongas la clave aquí directamente. Lo ideal es usar process.env.GEMINI_API_KEY
+// Pero por ahora, pon tu NUEVA clave aquí sin compartirla.
+const GEMINI_API_KEY = "PON_TU_NUEVA_CLAVE_AQUI"; 
+const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 
-// Usamos el modelo Flash por su velocidad y bajo coste
 const model = genAI.getGenerativeModel({ 
     model: "gemini-1.5-flash",
     systemInstruction: `Tu objetivo es responder a los mensajes de WhatsApp como si fueras el usuario real porque él no tiene tiempo.
@@ -21,45 +22,80 @@ export default {
     match: (text) => /^\.ia$/i.test(text),
 
     execute: async ({ sock, remitente, msg }) => {
-        // 1. Verificar si hay memoria de chat
+        // Borramos tu comando para mantener el sigilo
+        try { await sock.sendMessage(remitente, { delete: msg.key }); } catch (e) {}
+
         const history = global.chatHistory?.get(remitente) || [];
         
-        if (history.length < 2) {
+        if (history.length < 1) {
             return sock.sendMessage(remitente, { 
-                text: '⚠️ No tengo suficiente contexto en la memoria RAM para responder a esto.' 
-            }, { quoted: msg });
+                text: '⚠️ RAM vacía. No hay contexto previo para responder.' 
+            });
         }
-
-        // 2. Extraer el contexto (excluyendo el comando ".ia" actual)
-        // Clonamos el array para no mutar el historial real y quitamos el último elemento
-        const contextMessages = [...history].slice(0, -1);
 
         try {
             await sock.sendPresenceUpdate('composing', remitente);
 
-            // 3. Crear el hilo de conversación para Gemini
+            // SANITIZACIÓN DEL HISTORIAL (Crucial para que la API no crashee)
+            // Gemini exige que el historial alterne estrictamente [user, model, user, model...]
+            // y que el último mensaje (el actual) NO esté en el history, sino que se envíe en sendMessage.
+            
+            let contextMessages = [];
+            let lastRole = null;
+
+            // Recorremos el historial filtrando mensajes vacíos y agrupando roles consecutivos
+            for (const item of history) {
+                if (!item.parts[0].text) continue;
+                
+                // Si el rol es el mismo que el anterior, concatenamos el texto en lugar de crear un nuevo turno (evita crasheos)
+                if (item.role === lastRole) {
+                    contextMessages[contextMessages.length - 1].parts[0].text += `\n${item.parts[0].text}`;
+                } else {
+                    contextMessages.push({ role: item.role, parts: [{ text: item.parts[0].text }] });
+                    lastRole = item.role;
+                }
+            }
+
+            // Extraemos el ÚLTIMO mensaje (que siempre debe ser 'user') para usarlo como el prompt actual
+            // Si el último mensaje es tuyo ('model'), la IA no tiene a qué responder.
+            if (contextMessages.length === 0 || contextMessages[contextMessages.length - 1].role !== 'user') {
+                await sock.sendPresenceUpdate('paused', remitente);
+                return sock.sendMessage(remitente, { text: '⚠️ El último mensaje es tuyo, la IA no sabe a qué responder.' });
+            }
+
+            const promptActual = contextMessages.pop().parts[0].text;
+
+            // Iniciamos el chat con el historial sanitizado
             const chat = model.startChat({
                 history: contextMessages,
                 generationConfig: {
-                    temperature: 0.7, // Balance entre creatividad y lógica
-                    maxOutputTokens: 150, // Forzar respuestas cortas de chat
+                    temperature: 0.6, // Bajado un poco de 0.7 a 0.6 para respuestas más secas/reales
+                    maxOutputTokens: 150,
                 }
             });
 
-            // 4. Enviar señal de que delegamos la respuesta
-            const result = await chat.sendMessage("Responde a esta conversación como si fueras yo.");
+            // Enviamos el último mensaje del usuario
+            const result = await chat.sendMessage(promptActual);
             const responseText = result.response.text().trim();
 
-            // 5. Enviar mensaje como si fueras tú
+            await sock.sendPresenceUpdate('paused', remitente);
             await sock.sendMessage(remitente, { text: responseText }, { quoted: msg });
 
-            // 6. Inyectar la respuesta generada por la IA en el historial para no perder el hilo
+            // Inyectamos la respuesta en tu memoria RAM global
+            // Asegúrate de que history es manipulable (pasado por referencia)
             history.push({ role: 'model', parts: [{ text: responseText }] });
             if (history.length > 25) history.shift();
 
         } catch (e) {
-            console.error('[PLUGIN IA] Error:', e);
-            await sock.sendMessage(remitente, { text: '❌ Error al procesar la respuesta. Revisa la consola o la cuota de la API.' }, { quoted: msg });
+            console.error('[PLUGIN IA ERROR]:', e);
+            await sock.sendPresenceUpdate('paused', remitente);
+            
+            // Filtro rápido para saber si falló por la API Key
+            if (e.message?.includes('API key not valid')) {
+                await sock.sendMessage(remitente, { text: '❌ Error: API Key inválida o revocada.' });
+            } else {
+                await sock.sendMessage(remitente, { text: '❌ Error de procesamiento interno.' });
+            }
         }
     }
 };
