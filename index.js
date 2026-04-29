@@ -15,12 +15,11 @@ global.db.defaults({
     users: {}, 
     chats: {}, 
     settings: { grupos: true, autosticker: false },
-    vigilancia: {} // Almacena JID: { logs: [] }
+    vigilancia: {} 
 }).write();
 
-// 🔴 BLINDAJE DE MEMORIA: Forzamos la carga de datos al arrancar
+// BLINDAJE DE MEMORIA: Carga inicial
 global.db.data = global.db.getState();
-
 console.log('[INFO] Base de datos JSON cargada y lista.');
 
 // ==========================================
@@ -30,9 +29,9 @@ global.shadowTargets = {};
 global.sniperTargets = {}; 
 global.lastMsgTimestamps = {}; 
 global.sesionesVigilia = {}; 
+global.chatHistory = new Map(); // Memoria RAM para Gemini
 global.plugins = [];
 
-// --- OPTIMIZACIÓN DE ARRANQUE: BINARIOS ---
 const isWindows = process.platform === 'win32';
 const binarios = ['yt-dlp', 'ffmpeg', 'webpmux']; 
 
@@ -40,14 +39,11 @@ binarios.forEach(bin => {
     const fileName = isWindows ? `${bin}.exe` : bin;
     const binPath = path.join(__dirname, fileName);
     if (fs.existsSync(binPath) && !isWindows) {
-        try { 
-            fs.chmodSync(binPath, '755'); 
-        } catch (e) {}
+        try { fs.chmodSync(binPath, '755'); } catch (e) {}
     }
 });
 
 async function iniciarBot() {
-    // --- CARGA DINÁMICA DE PLUGINS ---
     const pluginsDir = path.join(__dirname, 'plugins');
     if (!fs.existsSync(pluginsDir)) fs.mkdirSync(pluginsDir);
     
@@ -79,15 +75,14 @@ async function iniciarBot() {
     sock.ev.on('creds.update', saveCreds);
 
     // ==========================================
-    //      CORE: PRESENCE (SHADOW, SNIPER & VIGILANCIA)
+    //      CORE: PRESENCE (VIGILANCIA, SHADOW, SNIPER)
     // ==========================================
     sock.ev.on('presence.update', async ({ id, presences }) => {
         const target = id;
         const status = presences[target]?.lastKnownPresence;
         const ahora = Date.now();
 
-        // --- LÓGICA DE VIGILANCIA (Centinela) ---
-        // Usamos optional chaining (?.) por seguridad extrema
+        // 1. Vigilancia (Centinela)
         if (global.db.data?.vigilancia?.[target]) {
             if (status === 'available') {
                 if (!global.sesionesVigilia[target]) {
@@ -98,7 +93,7 @@ async function iniciarBot() {
                 const inicio = global.sesionesVigilia[target];
                 if (inicio) {
                     const duracion = ahora - inicio;
-                    if (duracion > 3000) { // Ignoramos micro-desconexiones (<3s)
+                    if (duracion > 3000) { 
                         if (!global.db.data.vigilancia[target].logs) global.db.data.vigilancia[target].logs = [];
                         global.db.data.vigilancia[target].logs.push({ inicio, fin: ahora, duracion });
                         global.db.write();
@@ -109,7 +104,7 @@ async function iniciarBot() {
             }
         }
 
-        // --- LÓGICA SHADOW (Mímica) ---
+        // 2. Shadow (Mímica)
         if (global.shadowTargets[target]) {
             if (status === 'composing' || status === 'recording') {
                 await sock.sendPresenceUpdate(status, target);
@@ -118,7 +113,7 @@ async function iniciarBot() {
             }
         }
 
-        // --- LÓGICA SNIPER (Dime?) ---
+        // 3. Sniper (Dime?)
         if (global.sniperTargets[target] && (status === 'composing' || status === 'recording')) {
             try {
                 await new Promise(r => setTimeout(r, 700));
@@ -157,10 +152,8 @@ async function iniciarBot() {
             console.log(`[INFO] ¡Conectado! (${global.plugins.length} plugins cargados)`);
             
             // RE-SUSCRIPCIÓN DE VIGILANCIA
-            // Extraemos los objetivos directamente del estado limpio
             const dataVigilancia = global.db.data?.vigilancia || {};
             const objetivos = Object.keys(dataVigilancia);
-            
             for (const target of objetivos) {
                 try {
                     await sock.presenceSubscribe(target);
@@ -184,14 +177,9 @@ async function iniciarBot() {
         const msg = m.messages[0];
         if (!msg.message || msg.key.remoteJid === 'status@broadcast') return;
 
-        // Actualizamos estado db global si hay cambios desde plugins
         global.db.data = global.db.getState();
         const remitente = msg.key.remoteJid;
         
-        if (msg.key.fromMe && global.shadowTargets[remitente]) {
-            global.lastMsgTimestamps[remitente] = msg.messageTimestamp;
-        }
-
         let texto = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
         let buttonText = "";
         try {
@@ -206,9 +194,27 @@ async function iniciarBot() {
                 || msg?.message?.templateButtonReplyMessage?.selectedId
                 || "";
         }
-        
         if (buttonText) texto = buttonText;
         const textoLimpio = texto.trim();
+
+        // --- SISTEMA DE MEMORIA PARA GEMINI ---
+        if (textoLimpio && !textoLimpio.startsWith('.')) {
+            if (!global.chatHistory.has(remitente)) {
+                global.chatHistory.set(remitente, []);
+            }
+            const targetHistory = global.chatHistory.get(remitente);
+            targetHistory.push({
+                role: msg.key.fromMe ? 'model' : 'user',
+                parts: [{ text: textoLimpio }]
+            });
+            if (targetHistory.length > 20) targetHistory.shift();
+        }
+
+        // --- REGISTRO DE TIEMPO (Shadow) ---
+        if (msg.key.fromMe && global.shadowTargets[remitente]) {
+            global.lastMsgTimestamps[remitente] = msg.messageTimestamp;
+        }
+
         const msgType = Object.keys(msg.message).find(k => ['videoMessage', 'imageMessage', 'documentMessage', 'audioMessage', 'stickerMessage'].includes(k));
         const quoted = msg.message.extendedTextMessage?.contextInfo?.quotedMessage;
 
@@ -225,7 +231,7 @@ async function iniciarBot() {
             if (plugin.match && plugin.match(textoLimpio, ctx)) {
                 try {
                     await plugin.execute(ctx);
-                    global.db.write(); // Guardamos db tras ejecución de plugin
+                    global.db.write(); 
                 } catch (err) {
                     console.error(`Error en plugin ${plugin.name}:`, err);
                 }
