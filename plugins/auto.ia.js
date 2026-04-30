@@ -1,113 +1,175 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
-
 global.autoIaTargets = global.autoIaTargets || {};
+global.msgQueues = global.msgQueues || {};
+global.msgTimers = global.msgTimers || {};
 
-// ⚠️ TU CLAVE AQUÍ
-const GEMINI_API_KEY = "TU_NUEVA_API_KEY_AQUI"; 
-const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+// ⚠️ TUS CLAVES API
+const OPENROUTER_API_KEY = "sk-tu-api"; 
+const GROQ_API_KEY = "gsk_tu-api"; 
 
 export default {
-    name: 'auto_ia_responder_v2',
+    name: 'auto_ia_responder_v6_bulletproof',
     match: (text, ctx) => {
         if (ctx.msg.key.fromMe && /^\.autoia/i.test(text)) return true;
-        if (global.autoIaTargets[ctx.remitente] && !ctx.msg.key.fromMe) return true;
+        if (global.autoIaTargets[ctx.remitente] && !ctx.msg.key.fromMe) {
+            if (text || ctx.msgType === 'audioMessage') return true;
+        }
         return false;
     },
     
-    execute: async ({ sock, remitente, msg, textoLimpio }) => {
+    execute: async (ctx) => {
+        const { sock, remitente, msg, textoLimpio, msgType, downloadContentFromMessage } = ctx;
 
-        // --- FASE 1: CONTROL ---
+        // --- 1. CONTROL DE COMANDO ---
         if (msg.key.fromMe && /^\.autoia/i.test(textoLimpio)) {
             try { await sock.sendMessage(remitente, { delete: msg.key }); } catch (e) {}
             const args = textoLimpio.replace(/^\.autoia/i, '').trim();
 
             if (args.toLowerCase() === 'off') {
                 delete global.autoIaTargets[remitente];
-                return sock.sendMessage(remitente, { text: '🛑 *GECKCORE // AUTO-IA OFF*' });
+                delete global.msgQueues[remitente];
+                clearTimeout(global.msgTimers[remitente]);
+                return sock.sendMessage(remitente, { text: '🛑 *OFF*' });
             }
-
-            if (!args) return sock.sendMessage(remitente, { text: '⚠️ *ERROR:* Define un contexto.' });
+            if (!args) return sock.sendMessage(remitente, { text: '⚠️ Contexto?' });
 
             global.autoIaTargets[remitente] = { perfil: args, historial: [] };
-            return sock.sendMessage(remitente, { text: `🤖 *GECKCORE // AUTO-IA ON*\n> Perfil: _${args}_` });
+            return sock.sendMessage(remitente, { text: `🤖 *ON*\n> Perfil: _${args}_` });
         }
 
-        // --- FASE 2: INTERCEPCIÓN ---
-        if (global.autoIaTargets[remitente] && !msg.key.fromMe && textoLimpio) {
-            const config = global.autoIaTargets[remitente];
+        // --- 2. LÓGICA DE INTERCEPCIÓN Y AUDIO ---
+        if (global.autoIaTargets[remitente] && !msg.key.fromMe) {
+            let contenidoUsuario = textoLimpio;
 
-            try {
-                await sock.sendPresenceUpdate('composing', remitente);
-                config.historial.push({ role: 'user', parts: [{ text: textoLimpio }] });
+            if (msgType === 'audioMessage') {
+                try {
+                    await sock.sendPresenceUpdate('recording', remitente);
+                    
+                    const stream = await downloadContentFromMessage(msg.message.audioMessage, 'audio');
+                    let buffer = Buffer.from([]);
+                    for await (const chunk of stream) { buffer = Buffer.concat([buffer, chunk]); }
+                    
+                    const blob = new Blob([buffer], { type: 'audio/ogg' });
+                    const formData = new FormData();
+                    formData.append('file', blob, 'audio.ogg');
+                    formData.append('model', 'whisper-large-v3');
 
-                let safeHistory = [];
-                let lastRole = null;
-                for (const item of config.historial) {
-                    if (item.role === lastRole) {
-                        safeHistory[safeHistory.length - 1].parts[0].text += `\n${item.parts[0].text}`;
-                    } else {
-                        safeHistory.push({ role: item.role, parts: [{ text: item.parts[0].text }] });
-                        lastRole = item.role;
-                    }
+                    const groqRes = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+                        method: 'POST',
+                        headers: { 'Authorization': `Bearer ${GROQ_API_KEY}` },
+                        body: formData
+                    });
+
+                    if (!groqRes.ok) throw new Error("Fallo en Whisper");
+                    const groqData = await groqRes.json();
+                    contenidoUsuario = `[Audio transcrito]: ${groqData.text}`;
+
+                } catch (err) {
+                    console.error("[AUDIO ERROR]:", err.message);
+                    contenidoUsuario = "[Audio ininteligible, dile algo como 'no puedo escuchar audios ahora']";
                 }
+            }
 
-                const promptActual = safeHistory.pop().parts[0].text;
-                const model = genAI.getGenerativeModel({
-                    model: "gemini-2.5-flash",
-                    systemInstruction: `Eres un chaval español de 17 años hablando por WhatsApp.
-CONTACTO: ${config.perfil}
-REGLAS: Humano, respuestas secas de 1-3 líneas, español de España, nada de asteriscos ni saludos de IA.`
-                });
+            if (!contenidoUsuario) return;
 
-                const chat = model.startChat({
-                    history: safeHistory,
-                    generationConfig: { temperature: 0.65, maxOutputTokens: 150 }
-                });
+            // --- 3. SISTEMA DE AGRUPACIÓN RÁPIDA (DEBOUNCE 2.5s) ---
+            const textoRecortado = contenidoUsuario.substring(0, 200);
 
-                // --- SISTEMA DE RESILIENCIA GECKCORE ---
-                let result;
-                let intentos = 5; // Subimos a 5 intentos
-                let exito = false;
+            if (!global.msgQueues[remitente]) global.msgQueues[remitente] = [];
+            global.msgQueues[remitente].push(textoRecortado);
 
-                while (intentos > 0 && !exito) {
+            clearTimeout(global.msgTimers[remitente]);
+            await sock.sendPresenceUpdate('composing', remitente);
+
+            global.msgTimers[remitente] = setTimeout(async () => {
+                
+                const mensajesJuntos = global.msgQueues[remitente].join('\n');
+                delete global.msgQueues[remitente];
+                
+                const config = global.autoIaTargets[remitente];
+                config.historial.push({ role: 'user', content: mensajesJuntos });
+
+                let messages = [
+                    { 
+                        role: "system", 
+                        content: `Eres un chaval de 17 años. Contexto: ${config.perfil}. 
+                        REGLAS ORO: 
+                        1. Responde en minúsculas, usa abreviaturas (tb, q, xq, dnd, nse).
+                        2. Máximo 15 palabras.
+                        3. Si te insultan, devuélvela o sé muy cortante.
+                        4. Si te acusan de ser un bot o una IA, niégalo rotundamente, ríete de ellos o trátalos de locos ("q bot flipao", "tas tonto o q").` 
+                    },
+                    ...config.historial.slice(-6)
+                ];
+
+                let responseText = "";
+                let apiSuccess = false;
+                let retries = 3;
+
+                // Bucle de reintentos robusto para la API
+                while (retries > 0 && !apiSuccess) {
                     try {
-                        result = await chat.sendMessage(promptActual);
-                        exito = true;
-                    } catch (err) {
-                        if (err.status === 503 || err.status === 429) {
-                            intentos--;
-                            console.log(`[!] Google saturado. Reintento ${5 - intentos}/5 en 5s...`);
-                            if (intentos > 0) await new Promise(r => setTimeout(r, 5000)); // Espera 5 segundos
-                        } else {
-                            throw err; 
+                        const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+                            method: "POST",
+                            headers: {
+                                "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
+                                "Content-Type": "application/json"
+                            },
+                            body: JSON.stringify({
+                                "model": "deepseek/deepseek-v4-flash",
+                                "messages": messages,
+                                "temperature": 0.85,
+                                "max_tokens": 50, 
+                                "top_p": 0.9
+                            })
+                        });
+
+                        if (!res.ok) {
+                            const errBody = await res.text();
+                            throw new Error(`HTTP ${res.status}: ${errBody}`);
                         }
+
+                        const response = await res.json();
+                        let rawContent = response.choices?.[0]?.message?.content;
+                        
+                        if (rawContent) {
+                            responseText = rawContent.trim().toLowerCase();
+                            apiSuccess = true;
+                        } else {
+                            throw new Error("Respuesta nula de OpenRouter");
+                        }
+
+                    } catch (err) {
+                        retries--;
+                        console.error(`[IA RETRY] Error: ${err.message.substring(0, 50)}... Quedan: ${retries}`);
+                        if (retries > 0) await new Promise(r => setTimeout(r, 2000));
                     }
                 }
 
-                if (!exito) throw new Error("GOOGLE_SATURED_ABORT");
+                // --- FAIL-SAFE DE EMERGENCIA ---
+                // Si la API falla los 3 intentos (por censura de insultos o saturación), 
+                // soltamos una respuesta genérica para no quedarnos callados.
+                if (!apiSuccess || !responseText) {
+                    const emergencias = ["q dices", "jaja", "ok", "?", "paso", "no ralles", "q pesado", "ya", "dime"];
+                    responseText = emergencias[Math.floor(Math.random() * emergencias.length)];
+                    console.log("[IA FAILSAFE] API bloqueada/caída. Usando respuesta de emergencia.");
+                } else {
+                    // Limpieza normal si la API sí respondió
+                    responseText = responseText.replace(/\*/g, '').replace(/[.!?]$/, '').replace(/^(hola|buenas).*/i, '');
+                }
 
-                let responseText = result.response.text().trim();
-                responseText = responseText.replace(/\*/g, '').replace(/^(hola|buenas).*/i, '').trim();
+                if (!responseText) responseText = "ok"; // Doble seguro
 
-                config.historial.push({ role: 'model', parts: [{ text: responseText }] });
-                if (config.historial.length > 20) config.historial = config.historial.slice(-20);
+                config.historial.push({ role: 'assistant', content: responseText });
+                if (config.historial.length > 10) config.historial.shift();
 
-                const typingTime = Math.min(responseText.length * 45 + 1500, 8000);
-                await new Promise(r => setTimeout(r, typingTime));
+                const delay = Math.min(responseText.length * 35 + 500, 2500);
+                await new Promise(r => setTimeout(r, delay));
 
                 await sock.sendPresenceUpdate('paused', remitente);
                 await sock.sendMessage(remitente, { text: responseText });
 
-            } catch (e) {
-                console.error('[AUTO-IA ERROR]:', e.message);
-                await sock.sendPresenceUpdate('paused', remitente);
-                
-                if (e.message?.includes('API key not valid')) {
-                    await sock.sendMessage(remitente, { text: '❌ API KEY INVÁLIDA.' });
-                    delete global.autoIaTargets[remitente];
-                }
-                // Si fallan los 5 reintentos, el bot simplemente no contesta este mensaje para no delatarse.
-            }
+            }, 2500); 
         }
     }
 };
+
