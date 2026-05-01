@@ -5,8 +5,7 @@ export default {
     match: (text) => /^\.factura\s+/i.test(text),
     execute: async ({ sock, remitente, msg, textoLimpio }) => {
         
-        const isGroup = remitente.endsWith('@g.us');
-        if (!isGroup) return sock.sendMessage(remitente, { text: "❌ Ejecución denegada. Módulo diseñado solo para grupos." }, { quoted: msg });
+        
 
         const mentionedJid = msg.message.extendedTextMessage?.contextInfo?.mentionedJid?.[0];
         if (!mentionedJid) return sock.sendMessage(remitente, { text: "❌ Faltan parámetros. Usa: .factura @user cantidad | concepto" });
