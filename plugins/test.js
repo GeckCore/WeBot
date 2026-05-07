@@ -1,27 +1,28 @@
 export default {
-    name: 'instagram_stalk',
-    match: (text) => /^\.igs\s+([a-zA-Z0-9._]+)$/i.test(text),
+    name: 'instagram_stalk_v4',
+    match: (text) => /^\.ig\s+([a-zA-Z0-9._]+)$/i.test(text),
     
     execute: async ({ sock, remitente, msg, textoLimpio }) => {
-        // Extraemos el username del comando
         const username = textoLimpio.split(/\s+/)[1];
         const apiKey = "geckcore";
         const apiUrl = `https://api.yuki-wabot.my.id/stalking/instagram?username=${username}&apikey=${apiKey}`;
 
         try {
-            // Indicador de carga
-            await sock.sendMessage(remitente, { text: `🔍 *GECKCORE // BUSCANDO:* @${username}...` }, { quoted: msg });
+            await sock.sendMessage(remitente, { text: `🔍 *GECKCORE // RASTREANDO:* @${username}...` }, { quoted: msg });
 
             const response = await fetch(apiUrl);
-            
-            // Si la API falla o el usuario no existe
-            if (!response.ok) throw new Error("Perfil no encontrado o API caída.");
-            
             const data = await response.json();
 
-            if (!data.status || !data.result) {
+            // --- BLOQUE DEBUG ---
+            // Mira la consola de tu bot para ver qué responde la API realmente
+            console.log(`[IG DEBUG] Respuesta para ${username}:`, JSON.stringify(data, null, 2));
+            // --------------------
+
+            if (!data.status || !data.result || data.result.username === undefined) {
+                // Si la API responde pero no trae datos, es que el scraper está "quemado"
+                const errorMsg = data.message || "El servidor de la API no puede acceder a Instagram ahora mismo.";
                 return sock.sendMessage(remitente, { 
-                    text: `❌ *ERROR:* No se pudo encontrar información para @${username}. Revisa si la cuenta es pública.` 
+                    text: `❌ *ERROR DE API:* ${errorMsg}\n\n> Lo más probable es que Instagram haya bloqueado temporalmente al bot de Yuki. Prueba con otro usuario o más tarde.` 
                 });
             }
 
@@ -30,27 +31,24 @@ export default {
             
 • *Nombre:* ${res.full_name || 'No definido'}
 • *Username:* @${res.username}
-• *ID:* ${res.id}
 • *Bio:* ${res.biography || 'Sin biografía.'}
 
 📊 *ESTADÍSTICAS*
-• *Seguidores:* ${res.followers.toLocaleString()}
-• *Seguidos:* ${res.following.toLocaleString()}
-• *Posts:* ${res.posts_count.toLocaleString()}
+• *Seguidores:* ${res.followers?.toLocaleString() || '0'}
+• *Seguidos:* ${res.following?.toLocaleString() || '0'}
+• *Posts:* ${res.posts_count?.toLocaleString() || '0'}
 
-🔗 *Enlace:* https://instagram.com/${res.username}
-${res.external_url ? `🌐 *Web:* ${res.external_url}` : ''}`;
+🔗 *Link:* https://instagram.com/${res.username}`;
 
-            // Enviamos la foto de perfil con la info
             await sock.sendMessage(remitente, { 
                 image: { url: res.profile_pic }, 
                 caption: info 
             }, { quoted: msg });
 
         } catch (e) {
-            console.error('[IG STALK ERROR]:', e);
+            console.error('[IG STALK CRITICAL]:', e);
             await sock.sendMessage(remitente, { 
-                text: '❌ *ERROR CRÍTICO:* La API de Yuki no responde o el usuario no existe.' 
+                text: '❌ *ERROR CRÍTICO:* La API ha muerto o ha cambiado su estructura. Revisa la consola.' 
             });
         }
     }
