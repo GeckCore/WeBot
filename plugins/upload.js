@@ -10,7 +10,8 @@ export default {
             return sock.sendMessage(remitente, { text: '⚠️ *GECKCORE // ERROR*\nResponde a un archivo con `.upload`.' });
         }
 
-        const apiKey = "geckcore";
+        // 🟢 Ahora extraemos la clave desde el archivo .env
+        const apiKey = process.env.YUKI_API_KEY; 
         const apiUrl = `https://api.yuki-wabot.my.id/tools/upload?apikey=${apiKey}`;
 
         try {
@@ -31,7 +32,6 @@ export default {
 
             const data = await response.json();
 
-            // --- CORRECCIÓN AQUÍ: Acceso directo a data.url ---
             if (data.status === true && data.url) {
                 const info = `✅ *ARCHIVO ALOJADO EXITOSAMENTE*
                 
@@ -44,13 +44,13 @@ export default {
             } else {
                 console.error("[YUKI UPLOAD DEBUG]:", data);
                 await sock.sendMessage(remitente, { 
-                    text: `❌ *ERROR DE ESTRUCTURA:* La API cambió el formato de respuesta.` 
+                    text: `❌ *ERROR:* No se pudo obtener el enlace. Revisa la consola o la cuota de la API.` 
                 });
             }
 
         } catch (e) {
             console.error('[YUKI UPLOAD CRITICAL]:', e);
-            await sock.sendMessage(remitente, { text: '❌ *ERROR CRÍTICO:* Fallo de conexión.' });
+            await sock.sendMessage(remitente, { text: '❌ *ERROR CRÍTICO:* Fallo de conexión con el servidor.' });
         }
     }
 };
