@@ -1,10 +1,9 @@
 export default {
-    name: 'quote_sticker_v5',
+    name: 'quote_sticker_v6',
     match: (text) => text.toLowerCase().startsWith('.qc') || text.toLowerCase().startsWith('.quote'),
     
     execute: async ({ sock, remitente, msg, textoLimpio, quoted }) => {
         try {
-            // 1. Limpieza de texto
             let textToQuote = textoLimpio.replace(/^\.(qc|quote)\s*/i, '').trim();
             if (!textToQuote && quoted) {
                 textToQuote = quoted.conversation || quoted.extendedTextMessage?.text || quoted.imageMessage?.caption || "";
@@ -14,12 +13,13 @@ export default {
 
             await sock.sendPresenceUpdate('composing', remitente);
 
-            // 2. Obtención de datos (Evitamos el nombre "." que da problemas)
             const contextInfo = msg.message.extendedTextMessage?.contextInfo;
             const targetJid = quoted ? (contextInfo?.participant || contextInfo?.remoteJid) : remitente;
             
+            // LIMPIEZA EXTREMA: Quitamos emojis y símbolos raros del nombre para evitar el error 500
             let name = (quoted ? "Usuario" : msg.pushName) || "GECKCORE";
-            if (name === "." || name.length < 2) name = "GECKCORE User"; // Fail-safe para el nombre
+            name = name.replace(/[^a-zA-Z0-9]/g, ' ').trim(); 
+            if (name.length < 2) name = "GeckCore";
 
             let ppUrl;
             try {
@@ -28,7 +28,6 @@ export default {
                 ppUrl = 'https://cdn.pixabay.com/photo/2015/10/05/22/37/blank-profile-picture-973460_960_720.png';
             }
 
-            // 3. Construcción de URL
             const apiKey = process.env.YUKI_API_KEY;
             const params = new URLSearchParams({
                 method: 'URL',
@@ -41,12 +40,16 @@ export default {
 
             const finalUrl = `https://api.yuki-wabot.my.id/tools/quotesticker?${params.toString()}`;
 
-            // 4. Petición y manejo de respuesta
-            const response = await fetch(finalUrl);
-            
-            // Si la API devuelve un error de red
+            // AÑADIMOS HEADERS DE NAVEGADOR (User-Agent) para engañar a la API
+            const response = await fetch(finalUrl, {
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept': 'application/json,text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8'
+                }
+            });
+
             if (!response.ok) {
-                console.error(`[QC ERROR] HTTP ${response.status}`);
+                console.error(`[QC ERROR] La API devolvió ${response.status}. URL intentada: ${finalUrl}`);
                 return;
             }
 
@@ -54,7 +57,6 @@ export default {
 
             if (contentType && contentType.includes('application/json')) {
                 const data = await response.json();
-                // Yuki a veces devuelve .result, otras .url, otras .result.url
                 const stickerUrl = data.result?.url || data.result || data.url;
 
                 if (stickerUrl) {
@@ -62,12 +64,9 @@ export default {
                         sticker: { url: stickerUrl },
                         mimetype: 'image/webp'
                     }, { quoted: msg });
-                } else {
-                    // Si llegamos aquí, la API respondió pero no hay link. Logeamos la respuesta entera.
-                    console.log("[QC DEBUG] Respuesta JSON inesperada:", JSON.stringify(data));
                 }
             } else {
-                // Si la API devuelve el archivo PNG/WebP directamente (binario)
+                // Si devuelve la imagen directamente
                 const buffer = await response.arrayBuffer();
                 await sock.sendMessage(remitente, { 
                     sticker: Buffer.from(buffer),
@@ -76,7 +75,7 @@ export default {
             }
 
         } catch (e) {
-            console.error('[QC CRITICAL ERROR]:', e.stack);
+            console.error('[QC CRITICAL ERROR]:', e.message);
         }
     }
 };
