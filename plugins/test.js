@@ -1,55 +1,65 @@
 export default {
-    name: 'instagram_stalk_v4',
-    match: (text) => /^\.ig\s+([a-zA-Z0-9._]+)$/i.test(text),
+    name: 'yuki_uploader',
+    match: (text) => /^\.upload$/i.test(text),
     
-    execute: async ({ sock, remitente, msg, textoLimpio }) => {
-        const username = textoLimpio.split(/\s+/)[1];
+    execute: async ({ sock, remitente, msg, quoted, getMediaInfo, downloadContentFromMessage }) => {
+        // 1. Detectar el archivo (en el mensaje actual o en el respondido)
+        const targetMsg = quoted ? quoted : msg.message;
+        const media = getMediaInfo(targetMsg);
+
+        if (!media) {
+            return sock.sendMessage(remitente, { text: '⚠️ *GECKCORE // ERROR*\nResponde a una imagen, vídeo o audio con `.upload` para generar un enlace.' });
+        }
+
         const apiKey = "geckcore";
-        const apiUrl = `https://api.yuki-wabot.my.id/stalking/instagram?username=${username}&apikey=${apiKey}`;
+        const apiUrl = `https://api.yuki-wabot.my.id/tools/upload?apikey=${apiKey}`;
 
         try {
-            await sock.sendMessage(remitente, { text: `🔍 *GECKCORE // RASTREANDO:* @${username}...` }, { quoted: msg });
+            await sock.sendMessage(remitente, { text: '⏳ *GECKCORE // SUBIENDO:* Procesando archivo...' }, { quoted: msg });
 
-            const response = await fetch(apiUrl);
+            // 2. Descargar el media de los servidores de WhatsApp
+            const stream = await downloadContentFromMessage(media.msg, media.type);
+            let buffer = Buffer.from([]);
+            for await (const chunk of stream) {
+                buffer = Buffer.concat([buffer, chunk]);
+            }
+
+            // 3. Preparar el envío a la API de Yuki
+            const bodyForm = new FormData();
+            // Creamos un Blob a partir del buffer descargado
+            const blob = new Blob([buffer], { type: media.msg.mimetype || 'application/octet-stream' });
+            bodyForm.append('file', blob, `file.${media.type === 'image' ? 'jpg' : 'mp4'}`);
+
+            const response = await fetch(apiUrl, {
+                method: 'POST',
+                body: bodyForm
+            });
+
+            if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
+
             const data = await response.json();
 
-            // --- BLOQUE DEBUG ---
-            // Mira la consola de tu bot para ver qué responde la API realmente
-            console.log(`[IG DEBUG] Respuesta para ${username}:`, JSON.stringify(data, null, 2));
-            // --------------------
+            // 4. Validar respuesta y enviar enlace
+            if (data.status && data.result && data.result.url) {
+                const info = `✅ *ARCHIVO SUBIDO EXITOSAMENTE*
+                
+🔗 *Enlace:* ${data.result.url}
+📦 *Tamaño:* ${data.result.size || 'N/A'}
+⏱️ *Expira:* Nunca (según API)
 
-            if (!data.status || !data.result || data.result.username === undefined) {
-                // Si la API responde pero no trae datos, es que el scraper está "quemado"
-                const errorMsg = data.message || "El servidor de la API no puede acceder a Instagram ahora mismo.";
-                return sock.sendMessage(remitente, { 
-                    text: `❌ *ERROR DE API:* ${errorMsg}\n\n> Lo más probable es que Instagram haya bloqueado temporalmente al bot de Yuki. Prueba con otro usuario o más tarde.` 
+> *GECKCORE // CLOUD INTERFACE*`;
+                
+                await sock.sendMessage(remitente, { text: info }, { quoted: msg });
+            } else {
+                console.error("[YUKI UPLOAD DEBUG]:", data);
+                await sock.sendMessage(remitente, { 
+                    text: `❌ *ERROR DE API:* ${data.message || 'La API no devolvió un enlace válido.'}` 
                 });
             }
 
-            const res = data.result;
-            const info = `👤 *PERFIL DE INSTAGRAM*
-            
-• *Nombre:* ${res.full_name || 'No definido'}
-• *Username:* @${res.username}
-• *Bio:* ${res.biography || 'Sin biografía.'}
-
-📊 *ESTADÍSTICAS*
-• *Seguidores:* ${res.followers?.toLocaleString() || '0'}
-• *Seguidos:* ${res.following?.toLocaleString() || '0'}
-• *Posts:* ${res.posts_count?.toLocaleString() || '0'}
-
-🔗 *Link:* https://instagram.com/${res.username}`;
-
-            await sock.sendMessage(remitente, { 
-                image: { url: res.profile_pic }, 
-                caption: info 
-            }, { quoted: msg });
-
         } catch (e) {
-            console.error('[IG STALK CRITICAL]:', e);
-            await sock.sendMessage(remitente, { 
-                text: '❌ *ERROR CRÍTICO:* La API ha muerto o ha cambiado su estructura. Revisa la consola.' 
-            });
+            console.error('[YUKI UPLOAD CRITICAL]:', e);
+            await sock.sendMessage(remitente, { text: '❌ *ERROR CRÍTICO:* Fallo en la conexión con el servidor de Yuki.' });
         }
     }
 };
