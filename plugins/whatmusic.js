@@ -12,12 +12,13 @@ export default {
             });
         }
 
-        const apiKey = "geckcore";
+        // 🟢 Usamos la variable global cargada desde el .env
+        const apiKey = process.env.YUKI_API_KEY; 
         const uploadUrl = `https://api.yuki-wabot.my.id/tools/upload?apikey=${apiKey}`;
         const identifyUrl = `https://api.yuki-wabot.my.id/tools/whatmusic?apikey=${apiKey}&url=`;
 
         try {
-            await sock.sendMessage(remitente, { text: '🔍 *GECKCORE // ESCUCHANDO:* Analizando audio...' }, { quoted: msg });
+            await sock.sendMessage(remitente, { text: '🔍 *GECKCORE // ESCUCHANDO:* Analizando frecuencias...' }, { quoted: msg });
 
             const stream = await downloadContentFromMessage(media.msg, media.type);
             let buffer = Buffer.from([]);
@@ -36,11 +37,11 @@ export default {
             const response = await fetch(`${identifyUrl}${encodeURIComponent(fileUrl)}`);
             const responseData = await response.json();
 
-            // --- REPARACIÓN DE MAPEO SEGÚN TU LOG ---
+            // Mapeo corregido según tus logs anteriores
             if (responseData.status && responseData.data && responseData.data.length > 0) {
-                const res = responseData.data[0]; // Cogemos el primer resultado de la lista
+                const res = responseData.data[0]; 
                 
-                // Procesamos los links si existen (vienen como Array)
+                // Formateamos los links del array
                 const links = Array.isArray(res.url) ? res.url.join('\n🔗 ') : 'No disponible';
 
                 const info = `🎵 *MÚSICA DETECTADA*
@@ -61,13 +62,13 @@ export default {
             } else {
                 console.error("[WHATMUSIC DEBUG]:", responseData);
                 await sock.sendMessage(remitente, { 
-                    text: '❌ *SIN RESULTADOS:* No se ha encontrado ninguna coincidencia.' 
+                    text: '❌ *SIN RESULTADOS:* No he podido reconocer ninguna canción.' 
                 });
             }
 
         } catch (e) {
             console.error('[WHATMUSIC CRITICAL]:', e);
-            await sock.sendMessage(remitente, { text: '❌ *ERROR CRÍTICO:* Fallo en el proceso de análisis.' });
+            await sock.sendMessage(remitente, { text: '❌ *ERROR CRÍTICO:* Fallo en el motor de análisis.' });
         }
     }
 };
