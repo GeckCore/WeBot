@@ -37,7 +37,6 @@ export default {
                 
 🔗 *Enlace:* ${data.url}
 🛰️ *Servidor:* ${data.server || 'Catbox'}
-👤 *Creador:* ${data.creator || 'GECKCORE'}
 
 > *GECKCORE // DATA INTERFACE*`;
                 
