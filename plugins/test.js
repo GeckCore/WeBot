@@ -1,75 +1,72 @@
 export default {
-    name: 'quote_sticker_v3',
-    // Match simplificado para asegurar que siempre dispare
+    name: 'quote_sticker_v4',
+    // Disparador más flexible
     match: (text) => text.toLowerCase().startsWith('.qc') || text.toLowerCase().startsWith('.quote'),
     
     execute: async ({ sock, remitente, msg, textoLimpio, quoted }) => {
         try {
-            // 1. Extraer el texto: Prioridad al texto del comando, luego al mensaje citado
+            // 1. Extraer el texto
             let textToQuote = textoLimpio.replace(/^\.(qc|quote)\s*/i, '').trim();
             
             if (!textToQuote && quoted) {
                 textToQuote = quoted.conversation || 
                               quoted.extendedTextMessage?.text || 
-                              quoted.imageMessage?.caption || 
-                              quoted.videoMessage?.caption || "";
+                              quoted.imageMessage?.caption || "";
             }
 
-            // Si después de buscar no hay texto, avisamos
-            if (!textToQuote) {
-                return sock.sendMessage(remitente, { text: '⚠️ *GECKCORE // INFO*\nEscribe un texto o responde a un mensaje para crear el sticker.' });
-            }
+            if (!textToQuote) return; // Si no hay texto, no hacemos nada
 
             await sock.sendPresenceUpdate('composing', remitente);
 
-            // 2. Identificar al autor de la cita
-            // Si respondes a alguien, el autor es él. Si no, eres tú.
+            // 2. Datos del Autor
             const contextInfo = msg.message.extendedTextMessage?.contextInfo;
             const targetJid = quoted ? (contextInfo?.participant || contextInfo?.remoteJid) : remitente;
-            
-            // Nombre: Usamos el nombre que WhatsApp nos da en el paquete del mensaje
-            const name = (quoted ? "Usuario" : msg.pushName) || "GECKCORE User";
+            const name = (quoted ? (msg.message.extendedTextMessage.contextInfo.quotedMessage.pushName || "Usuario") : msg.pushName) || "GECKCORE";
 
-            // 3. Obtener la Foto de Perfil (Avatar)
+            // 3. Obtener foto de perfil
             let ppUrl;
             try {
                 ppUrl = await sock.profilePictureUrl(targetJid, 'image');
             } catch (e) {
-                // Imagen por defecto si falla (perfil privado)
                 ppUrl = 'https://cdn.pixabay.com/photo/2015/10/05/22/37/blank-profile-picture-973460_960_720.png';
             }
 
+            // 4. Construcción de la URL basada EN TU CAPTURA
+            // Parámetros detectados: method, avatar, username, text, color, key
             const apiKey = process.env.YUKI_API_KEY;
-            const color = '#1b1429'; // Color de fondo elegante
-
-            // 4. Construcción de la URL (Usando encodeURIComponent para que símbolos como # o & no rompan el link)
-            const apiUrl = `https://api.yuki-wabot.my.id/tools/quotesticker?method=URL&url=${encodeURIComponent(ppUrl)}&username=${encodeURIComponent(name)}&text=${encodeURIComponent(textToQuote)}&color=${encodeURIComponent(color)}&apikey=${apiKey}`;
-
-            // Log de depuración para que veas la URL generada en tu consola
-            console.log(`[QC DEBUG] Generando cita para: ${name}`);
-
-            const response = await fetch(apiUrl);
-            if (!response.ok) throw new Error(`API respondió con status ${response.status}`);
-
-            const data = await response.json();
+            const baseURL = "https://api.yuki-wabot.my.id/tools/quotesticker";
             
-            // La API de Yuki suele devolver el resultado en .result o .url
-            const stickerUrl = data.result || data.url;
+            const params = new URLSearchParams({
+                method: 'URL',
+                avatar: ppUrl, // Cambiado de 'url' a 'avatar'
+                username: name,
+                text: textToQuote,
+                color: '#000000', // Negro como en tu captura
+                key: apiKey // Cambiado de 'apikey' a 'key' según tu segunda captura
+            });
 
-            if (!stickerUrl) {
-                console.error("[QC API ERROR]:", data);
-                throw new Error("No se recibió la URL del sticker.");
+            const finalUrl = `${baseURL}?${params.toString()}`;
+            console.log(`[QC DEBUG] URL generada: ${finalUrl}`);
+
+            const response = await fetch(finalUrl);
+            
+            // La API devuelve directamente la imagen o un JSON con la URL
+            const contentType = response.headers.get('content-type');
+            
+            if (contentType && contentType.includes('application/json')) {
+                const data = await response.json();
+                const resultUrl = data.result || data.url;
+                if (resultUrl) {
+                    await sock.sendMessage(remitente, { sticker: { url: resultUrl } }, { quoted: msg });
+                }
+            } else {
+                // Si la API devuelve la imagen binaria directamente
+                const buffer = await response.arrayBuffer();
+                await sock.sendMessage(remitente, { sticker: Buffer.from(buffer) }, { quoted: msg });
             }
 
-            // 5. Envío del Sticker
-            await sock.sendMessage(remitente, { 
-                sticker: { url: stickerUrl },
-                mimetype: 'image/webp'
-            }, { quoted: msg });
-
         } catch (e) {
-            console.error('[QC CRITICAL ERROR]:', e.message);
-            await sock.sendMessage(remitente, { text: '❌ *ERROR:* No se pudo generar el sticker. Comprueba la API Key o el texto.' });
+            console.error('[QC ERROR]:', e.message);
         }
     }
 };
