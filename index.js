@@ -1,3 +1,4 @@
+require('dotenv').config(); // Esto carga las variables del .env en process.env
 const { default: makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion, downloadContentFromMessage } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode-terminal');
 const fs = require('fs');
