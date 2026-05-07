@@ -1,69 +1,57 @@
-import fs from 'fs';
-import { Buffer } from 'buffer';
-
 export default {
-    name: 'upscale_ai_v2',
-    match: (text) => /^\.upscale\s?(\d)?$/i.test(text),
+    name: 'instagram_stalk',
+    match: (text) => /^\.ig\s+([a-zA-Z0-9._]+)$/i.test(text),
     
-    // 🔴 Añadido 'textoLimpio' aquí abajo para que no de ReferenceError
-    execute: async ({ sock, remitente, msg, textoLimpio, quoted, getMediaInfo, downloadContentFromMessage }) => {
-        const targetMsg = quoted ? quoted : msg.message;
-        const media = getMediaInfo(targetMsg);
-
-        if (!media || media.type !== 'image') {
-            return sock.sendMessage(remitente, { text: '⚠️ *GECKCORE // ERROR*\nResponde a una imagen para procesar el reescalado.' });
-        }
-
-        // Ahora textoLimpio ya existe y no dará error
-        const matches = textoLimpio.match(/\d/);
-        const scale = matches ? matches[0] : "2";
-        const apiKey = "sylphy-qHHxzmP";
+    execute: async ({ sock, remitente, msg, textoLimpio }) => {
+        // Extraemos el username del comando
+        const username = textoLimpio.split(/\s+/)[1];
+        const apiKey = "geckcore";
+        const apiUrl = `https://api.yuki-wabot.my.id/stalking/instagram?username=${username}&apikey=${apiKey}`;
 
         try {
-            await sock.sendMessage(remitente, { text: `⏳ *INICIANDO:* Reescalado AI x${scale}...` }, { quoted: msg });
+            // Indicador de carga
+            await sock.sendMessage(remitente, { text: `🔍 *GECKCORE // BUSCANDO:* @${username}...` }, { quoted: msg });
 
-            // 1. Descarga del buffer de WhatsApp
-            const stream = await downloadContentFromMessage(media.msg, 'image');
-            let buffer = Buffer.from([]);
-            for await (const chunk of stream) { buffer = Buffer.concat([buffer, chunk]); }
-
-            // 2. Subida a Catbox (Uploader temporal)
-            const bodyForm = new FormData();
-            bodyForm.append('reqtype', 'fileupload');
-            // Usamos Blob para que sea compatible con el entorno del contenedor
-            bodyForm.append('fileToUpload', new Blob([buffer], { type: 'image/jpeg' }), 'image.jpg');
-
-            const uploadRes = await fetch('https://catbox.moe/user/api.php', {
-                method: 'POST',
-                body: bodyForm
-            });
-            
-            const imageUrl = await uploadRes.text();
-            
-            if (!imageUrl.startsWith('https://')) {
-                console.error("[UPLOADER DEBUG]:", imageUrl);
-                throw new Error("Respuesta del servidor de archivos no válida.");
-            }
-
-            // 3. Petición a la API de Sylphy
-            const apiUrl = `https://sylphyy.xyz/tools/upscale?url=${encodeURIComponent(imageUrl.trim())}&scale=${scale}&api_key=${apiKey}`;
-            
             const response = await fetch(apiUrl);
+            
+            // Si la API falla o el usuario no existe
+            if (!response.ok) throw new Error("Perfil no encontrado o API caída.");
+            
             const data = await response.json();
 
-            if (data.status !== true || !data.result) {
-                return sock.sendMessage(remitente, { text: `❌ *API Error:* ${data.message || 'Error en el motor AI'}` });
+            if (!data.status || !data.result) {
+                return sock.sendMessage(remitente, { 
+                    text: `❌ *ERROR:* No se pudo encontrar información para @${username}. Revisa si la cuenta es pública.` 
+                });
             }
 
-            // 4. Envío de vuelta al chat
+            const res = data.result;
+            const info = `👤 *PERFIL DE INSTAGRAM*
+            
+• *Nombre:* ${res.full_name || 'No definido'}
+• *Username:* @${res.username}
+• *ID:* ${res.id}
+• *Bio:* ${res.biography || 'Sin biografía.'}
+
+📊 *ESTADÍSTICAS*
+• *Seguidores:* ${res.followers.toLocaleString()}
+• *Seguidos:* ${res.following.toLocaleString()}
+• *Posts:* ${res.posts_count.toLocaleString()}
+
+🔗 *Enlace:* https://instagram.com/${res.username}
+${res.external_url ? `🌐 *Web:* ${res.external_url}` : ''}`;
+
+            // Enviamos la foto de perfil con la info
             await sock.sendMessage(remitente, { 
-                image: { url: data.result }, 
-                caption: `✅ *GECKCORE // PROCESO FINALIZADO*\n*Escala:* x${scale}\n*Status:* Paid API Tier` 
+                image: { url: res.profile_pic }, 
+                caption: info 
             }, { quoted: msg });
 
         } catch (e) {
-            console.error('[UPSCALER CRITICAL]:', e);
-            await sock.sendMessage(remitente, { text: '❌ *ERROR CRÍTICO:* Fallo en la subida o saturación de API.' });
+            console.error('[IG STALK ERROR]:', e);
+            await sock.sendMessage(remitente, { 
+                text: '❌ *ERROR CRÍTICO:* La API de Yuki no responde o el usuario no existe.' 
+            });
         }
     }
 };
