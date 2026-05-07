@@ -1,6 +1,6 @@
 export default {
     name: 'instagram_stalk',
-    match: (text) => /^\.ig\s+([a-zA-Z0-9._]+)$/i.test(text),
+    match: (text) => /^\.igs\s+([a-zA-Z0-9._]+)$/i.test(text),
     
     execute: async ({ sock, remitente, msg, textoLimpio }) => {
         // Extraemos el username del comando
