@@ -228,8 +228,6 @@ async function startSubBot(mainSock, remitente, msg, sessionFolder, phone, isCod
         if (!isOwnerSub) {
             return; // Ignora cualquier mensaje de usuarios que no sean el propietario
         }
-        
-        if (isGroup && global.db.data.settings.grupos === false && !/^\.grupo\s+on$/i.test(textoLimpio)) return;
 
         if (!global.chatHistory) global.chatHistory = new Map();
         if (!global.chatHistory.has(incomingSender)) global.chatHistory.set(incomingSender, []);
