@@ -1,6 +1,6 @@
 module.exports = {
     name: 'tagall',
-    match: (text) => /^(tagall|tag|hidetag|notificar)/i.test(text),
+    match: (text) => /^\.(tagall|tag|hidetag|notificar)\b/i.test((text || '').trim()),
     execute: async ({ sock, remitente, msg, textoLimpio, getMediaInfo, downloadContentFromMessage, quoted }) => {
         
         // 1. Validación de Grupo (Eliminada la validación de Admin)
@@ -10,7 +10,7 @@ module.exports = {
         const participantes = groupMetadata.participants.map(p => p.id);
 
         // 2. Extraer el texto del anuncio
-        let anuncio = textoLimpio.replace(/^(tagall|tag|hidetag|notificar)\s*/i, '').trim();
+        let anuncio = textoLimpio.replace(/^\.(tagall|tag|hidetag|notificar)\s*/i, '').trim();
         
         // 3. Lógica de Envío
         try {

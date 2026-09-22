@@ -1,6 +1,6 @@
 export default {
     name: 'suplantacion_cita',
-    match: (text) => /^\.fake\s+/i.test(text),
+    match: (text) => /^\.(fake|fakequote)\s+/i.test(text),
     execute: async ({ sock, remitente, msg, textoLimpio }) => {
         
         const isGroup = remitente.endsWith('@g.us');
@@ -10,11 +10,11 @@ export default {
 
         const mentionedJid = msg.message.extendedTextMessage?.contextInfo?.mentionedJid?.[0];
         if (!mentionedJid) {
-            return sock.sendMessage(remitente, { text: "❌ Tienes que mencionar a la víctima. Ej: .fake @usuario texto|reacción" });
+            return sock.sendMessage(remitente, { text: "❌ Tienes que mencionar a la víctima. Ej: .fakequote @usuario texto|reacción" });
         }
 
         // Extraemos todo lo que hay después del comando y la mención
-        const rawInput = textoLimpio.replace(/^\.fake\s+/i, '').replace(/@\d+/g, '').trim();
+        const rawInput = textoLimpio.replace(/^\.(fake|fakequote)\s+/i, '').replace(/@\d+/g, '').trim();
         
         let textoFalso = rawInput;
         let reaccion = "como?"; // Reacción predeterminada

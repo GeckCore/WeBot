@@ -1,12 +1,12 @@
 // plugins/remind.js
 module.exports = {
     name: 'remind',
-    match: (text) => /^(?:remind|recuerdame)\s+(.+)$/i.test(text),
+    match: (text) => /^\.(?:remind|recuerdame)\s+(.+)$/i.test(text),
     execute: async ({ sock, remitente, textoLimpio, axios, PYTHON_API }) => {
-        const content = textoLimpio.match(/^(?:remind|recuerdame)\s+(.+)$/i)[1].trim();
+        const content = textoLimpio.match(/^\.(?:remind|recuerdame)\s+(.+)$/i)[1].trim();
         const timeMatch = content.match(/(?:en\s+)?(\d+)\s*(m|min|minutos|h|horas|s|seg|segundos)$/i);
 
-        if (!timeMatch) return sock.sendMessage(remitente, { text: "⚠️ Formato inválido. Ej: remind tomar pre-entreno 30m" });
+        if (!timeMatch) return sock.sendMessage(remitente, { text: "⚠️ Formato inválido. Ej: .remind tomar pre-entreno 30m" });
 
         const amount = parseInt(timeMatch[1]);
         const unit = timeMatch[2].toLowerCase();

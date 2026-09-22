@@ -5,7 +5,7 @@ const execPromise = util.promisify(exec);
 
 module.exports = {
     name: 'update',
-    match: (text) => text.toLowerCase() === '!update',
+    match: (text) => /^\.update$/i.test((text || '').trim()),
     execute: async ({ sock, remitente }) => {
         await sock.sendMessage(remitente, { text: "⏳ Sincronizando cambios desde GitHub..." });
 
