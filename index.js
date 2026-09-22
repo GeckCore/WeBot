@@ -244,16 +244,19 @@ async function iniciarBot() {
         const ownerId = resolveOwnerId(sock.user?.id);
         const isOwner = isOwnerSender(senderJid, ownerId);
 
-        if (isGroup && settings.grupos === false && !/^\.grupo\s+on$/i.test(textoLimpio)) return;
+        // MODO PRIVADO: Solo el propietario puede usar el bot
+        // En grupos: ignora completamente a los no-propietarios
+        // En chats privados: ignora completamente a los no-propietarios
+        if (!isOwner) {
+            return; // Ignora cualquier mensaje de usuarios que no sean el propietario
+        }
+
+        if (isGroup && settings.grupos === false && !/\.grupo\s+on$/i.test(textoLimpio)) return;
 
         const ctx = { sock, msg, remitente, textoLimpio, getMediaInfo, downloadContentFromMessage, quoted, msgType, senderJid, ownerId, isOwner };
 
         for (const plugin of global.plugins) {
             if (plugin.match && plugin.match(textoLimpio, ctx)) {
-                if (!isOwner) {
-                    await sock.sendMessage(remitente, { text: '⛔ Acceso denegado: este bot está en modo privado y solo el propietario puede usar comandos.' });
-                    break;
-                }
                 try {
                     await plugin.execute(ctx);
                     global.db.write(); 
