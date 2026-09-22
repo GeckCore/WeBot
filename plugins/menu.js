@@ -8,7 +8,7 @@ const __dirname = path.dirname(__filename);
 
 export default {
     name: 'menu',
-    match: (text) => /^[!/](menu|help|comandos)$/i.test(text),
+    match: (text) => /^\.(menu|help|comandos)$/i.test(text),
     
     execute: async ({ sock, remitente, msg }) => {
         // 1. Cargamos el logo desde la ruta correcta
@@ -25,10 +25,15 @@ export default {
         // 2. Definimos la URL de tu panel de control de forma clara
         const controlPanelUrl = "https://geckcore.github.io/WeBot/";
 
-        // 3. ENVIAMOS EL MENSAJE
+        const menuTexto = `◢◤ *GECKCORE // HUB*\n\nComandos base:\n• .menu\n• .sticker / .s\n• .fakequote @usuario texto|respuesta\n• .qc texto\n• .readqr\n• .play nombre\n• .ytmp3 enlace\n• .ytmp4 enlace\n• .grupo on/off`;
+
         await sock.sendMessage(remitente, {
-            // El texto en bruto debajo asegura que cualquier móvil pueda clickarlo
-            text: `◢◤ *GECKCORE // HUB*\n\nAccede a la documentación y comandos en nuestra interfaz web oficial:\n${controlPanelUrl}`,
+            text: menuTexto
+        }, { quoted: msg });
+
+        // 3. ENVIAMOS ENLACE EN MENSAJE APARTE
+        await sock.sendMessage(remitente, {
+            text: `🔗 *Panel de control Web*\n${controlPanelUrl}`,
             mentions: [remitente],
             contextInfo: {
                 externalAdReply: {

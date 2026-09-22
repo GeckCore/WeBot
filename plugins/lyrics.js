@@ -3,9 +3,9 @@ const axios = require('axios');
 
 module.exports = {
     name: 'lyrics',
-    match: (text) => /^(letra|lyrics|lyric|lirik)\s+(.+)$/i.test(text),
+    match: (text) => /^\.(letra|lyrics|lyric|lirik)\s+(.+)$/i.test(text),
     execute: async ({ sock, remitente, textoLimpio, msg }) => {
-        const query = textoLimpio.match(/^(letra|lyrics|lyric|lirik)\s+(.+)$/i)[2].trim();
+        const query = textoLimpio.match(/^\.(letra|lyrics|lyric|lirik)\s+(.+)$/i)[2].trim();
         let statusMsg = await sock.sendMessage(remitente, { text: `🔎 Identificando canción: *${query}*...` });
 
         try {

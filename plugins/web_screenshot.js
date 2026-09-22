@@ -2,10 +2,10 @@ const axios = require('axios');
 
 module.exports = {
     name: 'screenshot',
-    match: (text) => /^view\s+https?:\/\/[^\s]+$/i.test(text),
+    match: (text) => /^\.view\s+https?:\/\/[^\s]+$/i.test(text),
     
     execute: async ({ sock, remitente, textoLimpio, msg }) => {
-        const urlCaptura = textoLimpio.split(/\s+/)[1];
+        const urlCaptura = textoLimpio.replace(/^\.view\s+/i, '').trim();
         let statusMsg = await sock.sendMessage(remitente, { text: `📸 *Iniciando captura multi-motor...*\n🔗 ${urlCaptura}` }, { quoted: msg });
 
         // Función para intentar con Google PageSpeed

@@ -6,9 +6,9 @@ const execPromise = util.promisify(exec);
 
 module.exports = {
     name: 'tomp3',
-    match: (text) => text.toLowerCase() === 'mp3',
+    match: (text) => /^\.mp3$/i.test((text || '').trim()),
     execute: async ({ sock, remitente, quoted, getMediaInfo, downloadContentFromMessage }) => {
-        if (!quoted) return sock.sendMessage(remitente, { text: "⚠️ Responde a un multimedia con 'mp3'." });
+        if (!quoted) return sock.sendMessage(remitente, { text: "⚠️ Responde a un multimedia con '.mp3'." });
         
         const mediaInfo = getMediaInfo(quoted);
         if (!mediaInfo || mediaInfo.type === 'image') return sock.sendMessage(remitente, { text: "❌ No hay multimedia compatible." });

@@ -9,7 +9,9 @@ export default {
             if (!textToQuote && quoted) {
                 textToQuote = quoted.conversation || quoted.extendedTextMessage?.text || quoted.imageMessage?.caption || "";
             }
-            if (!textToQuote) return;
+            if (!textToQuote) {
+                return sock.sendMessage(remitente, { text: "⚠️ Escribe texto o responde a un mensaje con *.qc*." }, { quoted: msg });
+            }
 
             await sock.sendPresenceUpdate('composing', remitente);
 
@@ -32,6 +34,9 @@ export default {
             }
 
             const apiKey = process.env.YUKI_API_KEY;
+            if (!apiKey) {
+                return sock.sendMessage(remitente, { text: "❌ Falta configurar YUKI_API_KEY para usar .qc/.quote." }, { quoted: msg });
+            }
 
             // 4. EL PUENTE: Usar el Uploader de Yuki (Que sabemos que te funciona)
             const uploadForm = new FormData();
@@ -66,7 +71,7 @@ export default {
 
             if (!response.ok) {
                 console.error(`[QC API ERROR]: HTTP ${response.status}`);
-                return;
+                return sock.sendMessage(remitente, { text: `❌ La API de quote devolvió HTTP ${response.status}.` }, { quoted: msg });
             }
 
             const data = await response.json();
@@ -77,10 +82,13 @@ export default {
                     sticker: { url: stickerUrl },
                     mimetype: 'image/webp'
                 }, { quoted: msg });
+            } else {
+                await sock.sendMessage(remitente, { text: "❌ La API no devolvió un sticker válido." }, { quoted: msg });
             }
 
         } catch (e) {
             console.error('[QC CRITICAL ERROR]:', e.message);
+            await sock.sendMessage(remitente, { text: `❌ Error en .qc: ${e.message || 'fallo inesperado'}` }, { quoted: msg });
         }
     }
 };

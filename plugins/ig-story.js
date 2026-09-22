@@ -6,10 +6,10 @@ const execPromise = util.promisify(exec);
 
 module.exports = {
     name: 'ig',
-    match: (text) => /^ig\s+(https?:\/\/(www\.)?instagram\.com\/[^\s]+)$/i.test(text),
+    match: (text) => /^\.ig\s+(https?:\/\/(www\.)?instagram\.com\/[^\s]+)$/i.test(text),
 
     execute: async ({ sock, remitente, textoLimpio }) => {
-        const urlMatch = textoLimpio.match(/^ig\s+(https?:\/\/(www\.)?instagram\.com\/[^\s]+)$/i);
+        const urlMatch = textoLimpio.match(/^\.ig\s+(https?:\/\/(www\.)?instagram\.com\/[^\s]+)$/i);
         if (!urlMatch) return;
 
         let urlLimpia = urlMatch[1].split('?')[0];

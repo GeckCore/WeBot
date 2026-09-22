@@ -1,8 +1,8 @@
-/*const fs = require('fs');
+const fs = require('fs');
 const path = require('path');
-const { exec } = require('child_process');
+const { execFile } = require('child_process');
 const util = require('util');
-const execPromise = util.promisify(exec);
+const execFilePromise = util.promisify(execFile);
 
 module.exports = {
     name: 'downloads',
@@ -14,28 +14,53 @@ module.exports = {
         if (!urlMatch) return;
         
         let urlLimpia = urlMatch[1].split(/[?&]si=/)[0].split(/[&?]feature=/)[0];
+        let parsedUrl;
+        try {
+            parsedUrl = new URL(urlLimpia);
+        } catch {
+            return sock.sendMessage(remitente, { text: "❌ Enlace inválido." });
+        }
+        const host = parsedUrl.hostname.replace(/^www\./, '').toLowerCase();
+        const allowedHosts = new Set(['instagram.com', 'tiktok.com', 'vm.tiktok.com', 'vt.tiktok.com']);
+        if (!allowedHosts.has(host)) {
+            return sock.sendMessage(remitente, { text: "❌ Solo se permiten enlaces de Instagram o TikTok." });
+        }
+
         let statusMsg = await sock.sendMessage(remitente, { text: "⏳ Procesando enlace..." });
 
         const outName = path.join(__dirname, `../dl_${Date.now()}`);
         const ext = 'mp4'; // IG y TikTok se procesan siempre como video
-        
-        const ytDlpPath = path.join(__dirname, '../yt-dlp');
-        const ffmpegPath = path.join(__dirname, '../ffmpeg');
+
+        const binarySuffix = process.platform === 'win32' ? '.exe' : '';
+        const ytDlpPath = path.join(__dirname, `../yt-dlp${binarySuffix}`);
+        const ffmpegPath = path.join(__dirname, `../ffmpeg${binarySuffix}`);
         const igCookies = path.join(__dirname, '../instagram_cookies.txt');
 
-        let cookieArg = "";
-        if (urlLimpia.includes('instagram.com')) {
-            if (fs.existsSync(igCookies)) cookieArg = `--cookies "${igCookies}"`;
+        if (!fs.existsSync(ytDlpPath) || !fs.existsSync(ffmpegPath)) {
+            return sock.sendMessage(remitente, { text: "❌ Faltan binarios requeridos (yt-dlp/ffmpeg).", edit: statusMsg.key });
         }
 
-        const format = `-f "bestvideo+bestaudio/best" --merge-output-format mp4`;
-        const cmd = `${ytDlpPath} ${cookieArg} --ffmpeg-location "${ffmpegPath}" --no-playlist --no-warnings --geo-bypass -o "${outName}.%(ext)s" ${format} "${urlLimpia}"`;
+        const args = [];
+        if (urlLimpia.includes('instagram.com')) {
+            if (fs.existsSync(igCookies)) args.push('--cookies', igCookies);
+        }
+
+        args.push(
+            '--ffmpeg-location', ffmpegPath,
+            '--no-playlist',
+            '--no-warnings',
+            '--geo-bypass',
+            '-o', `${outName}.%(ext)s`,
+            '-f', 'bestvideo+bestaudio/best',
+            '--merge-output-format', 'mp4',
+            urlLimpia
+        );
 
         let success = false;
         let lastError = "";
 
         try {
-            await execPromise(cmd);
+            await execFilePromise(ytDlpPath, args, { windowsHide: true });
             if (fs.existsSync(`${outName}.${ext}`)) {
                 success = true;
             }

@@ -2,7 +2,7 @@
 const os = require('os');
 module.exports = {
     name: 'stats',
-    match: (text) => text.toLowerCase() === '!stats',
+    match: (text) => /^\.stats$/i.test((text || '').trim()),
     execute: async ({ sock, remitente }) => {
         const freemem = (os.freemem() / (1024 * 1024)).toFixed(0);
         const totalmem = (os.totalmem() / (1024 * 1024)).toFixed(0);

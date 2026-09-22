@@ -2,12 +2,12 @@
 const fs = require('fs');
 module.exports = {
     name: 'save',
-    match: (text) => text.toLowerCase().includes('save'),
+    match: (text) => /^\.save$/i.test((text || '').trim()),
     execute: async ({ sock, remitente, textoLimpio, msg, quoted, msgType, getMediaInfo, downloadContentFromMessage }) => {
         let mediaToSave = null;
         let typeToSave = null;
         
-        if (textoLimpio.toLowerCase() === 'save' && quoted) {
+        if (/^\.save$/i.test(textoLimpio) && quoted) {
             const mediaInfo = getMediaInfo(quoted);
             if (mediaInfo) { mediaToSave = mediaInfo.msg; typeToSave = mediaInfo.type; }
         } else if (msgType) {

@@ -3,7 +3,7 @@ const axios = require('axios');
 
 module.exports = {
     name: 'translate',
-    match: (text) => text.toLowerCase() === 'tr',
+    match: (text) => /^\.tr$/i.test((text || '').trim()),
     execute: async ({ sock, remitente, msg, quoted }) => {
         // 1. Tu número configurado (Asegúrate de que sea este)
         const OWNER_NUMBER = '5364531613735'; 
@@ -21,7 +21,7 @@ module.exports = {
 
         // 4. Verificar si hay un mensaje citado
         if (!quoted) {
-            return sock.sendMessage(remitente, { text: "⚠️ Responde a un mensaje con *tr* para traducirlo." });
+            return sock.sendMessage(remitente, { text: "⚠️ Responde a un mensaje con *.tr* para traducirlo." });
         }
 
         // 5. Extraer texto de cualquier tipo de mensaje citado
