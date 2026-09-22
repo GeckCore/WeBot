@@ -4,6 +4,7 @@ const path = require('path');
 const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
 const util = require('util');
 const execPromise = util.promisify(exec);
+const { ensureFfmpegAvailable } = require('../src/utils/ffmpeg');
 
 module.exports = {
     name: 'sticker_to_img',
@@ -20,6 +21,11 @@ module.exports = {
         const tempOut = path.join(__dirname, `../out_${Date.now()}.png`);
 
         try {
+            const ffmpegStatus = ensureFfmpegAvailable();
+            if (!ffmpegStatus.ok) {
+                return sock.sendMessage(remitente, { text: `❌ ${ffmpegStatus.message}` });
+            }
+
             // 1. Descargar el sticker
             const stream = await downloadContentFromMessage(quoted.stickerMessage, 'sticker');
             let buffer = Buffer.from([]);
@@ -29,8 +35,7 @@ module.exports = {
             fs.writeFileSync(tempWebp, buffer);
 
             // 2. Conversión simple (WebP estático -> PNG)
-            // Usamos el FFmpeg de la raíz que ya sabemos que funciona para fotos
-            await execPromise(`./ffmpeg -i ${tempWebp} ${tempOut}`);
+            await execPromise(`"${ffmpegStatus.ffmpegPath}" -y -i "${tempWebp}" "${tempOut}"`);
 
             if (fs.existsSync(tempOut)) {
                 await sock.sendMessage(remitente, { 

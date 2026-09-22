@@ -4,6 +4,9 @@ import path from 'path';
 import pino from 'pino';
 import NodeCache from 'node-cache';
 import { pathToFileURL } from 'url';
+import securityUtils from '../src/utils/security.js';
+
+const { extractSenderJid, resolveOwnerId, isOwnerSender } = securityUtils;
 
 if (!global.conns) global.conns = [];
 const msgRetryCounterCache = new NodeCache({ stdTTL: 0, checkperiod: 0 });
@@ -254,6 +257,12 @@ async function startSubBot(mainSock, remitente, msg, sessionFolder, phone, isCod
 
         for (const plugin of global.loadedPlugins) {
             if (plugin.match && plugin.match(textoLimpio, ctx)) {
+                const senderJid = extractSenderJid(message, subSock.user?.id);
+                const ownerId = resolveOwnerId(subSock.user?.id);
+                if (!isOwnerSender(senderJid, ownerId)) {
+                    await subSock.sendMessage(incomingSender, { text: '⛔ Acceso denegado: este bot está en modo privado y solo el propietario puede usar comandos.' });
+                    break;
+                }
                 try {
                     await plugin.execute(ctx);
                     global.db.write();

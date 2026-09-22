@@ -8,7 +8,7 @@ export default {
         
         // Inicializar el objeto si no existe
         if (global.db.data.settings.grupos === undefined) {
-            global.db.data.settings.grupos = true;
+            global.db.data.settings.grupos = Boolean(global.defaultGroupsEnabled);
         }
 
         if (action === 'on') {

@@ -1,0 +1,31 @@
+{
+  "name": "WeBot",
+  "description": "Bot de WhatsApp en Node.js",
+  "formation": {
+    "worker": {
+      "quantity": 1,
+      "size": "basic"
+    }
+  },
+  "buildpacks": [
+    {
+      "url": "heroku-community/apt"
+    },
+    {
+      "url": "heroku/nodejs"
+    }
+  ],
+  "env": {
+    "OWNER_NUMBER": {
+      "description": "Número/JID del propietario (ej: 34600000000 o 34600000000@s.whatsapp.net)"
+    },
+    "GROUPS_ENABLED_BY_DEFAULT": {
+      "description": "true para modo público en grupos al iniciar; false (default) para modo privado",
+      "value": "false"
+    },
+    "FFMPEG_PATH": {
+      "description": "Ruta opcional al binario ffmpeg (si se omite se intenta /app/ffmpeg o ffmpeg en PATH)",
+      "required": false
+    }
+  }
+}

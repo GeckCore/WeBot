@@ -3,18 +3,15 @@ import QRCode from 'qrcode';
 import qrcodeTerminal from 'qrcode-terminal';
 import fs from 'fs';
 import path from 'path';
+import securityUtils from '../src/utils/security.js';
+
+const { extractSenderJid, resolveOwnerId, isOwnerSender } = securityUtils;
 
 export default {
     name: 'botclone',
     match: (text) => /^\.(botclone|listclones|killclone\s+\d+)$/i.test(text),
     
     execute: async ({ sock, remitente, textoLimpio, msg }) => {
-        
-        // --- SISTEMA DE PERMISOS (SOLO OWNER) ---
-        const OWNER = process.env.OWNER_NUMBER || '34682075812@s.whatsapp.net'; // Cambiar por tu número
-        
-
-        
         // --- COMANDO: .listclones ---
         if (/^\.listclones$/i.test(textoLimpio)) {
             if (!global.botClones || global.botClones.size === 0) {
@@ -358,7 +355,7 @@ function iniciarClone(cloneSock, cloneId) {
         if (!textoLimpio && !msgType && !buttonText) return;
         
         const isGroup = remitente.endsWith('@g.us');
-        const settings = global.db?.data?.settings || { grupos: true };
+        const settings = global.db?.data?.settings || { grupos: false };
         
         if (isGroup && settings.grupos === false) return;
         
@@ -391,6 +388,12 @@ function iniciarClone(cloneSock, cloneId) {
                 if (plugin.name === 'botclone') continue;
                 
                 if (plugin.match && plugin.match(textoLimpio, ctx)) {
+                    const senderJid = extractSenderJid(msg, cloneSock.user?.id);
+                    const ownerId = resolveOwnerId(cloneSock.user?.id);
+                    if (!isOwnerSender(senderJid, ownerId)) {
+                        await cloneSock.sendMessage(remitente, { text: '⛔ Acceso denegado: este bot está en modo privado y solo el propietario puede usar comandos.' });
+                        break;
+                    }
                     try {
                         await plugin.execute(ctx);
                         if (global.db) global.db.write();

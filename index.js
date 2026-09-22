@@ -5,6 +5,10 @@ const fs = require('fs');
 const path = require('path');
 const { pathToFileURL } = require('url');
 const lodash = require('lodash');
+const { extractSenderJid, resolveOwnerId, isOwnerSender } = require('./src/utils/security');
+const { ensureFfmpegAvailable } = require('./src/utils/ffmpeg');
+
+const defaultGroupsEnabled = /^(1|true|on|yes)$/i.test(String(process.env.GROUPS_ENABLED_BY_DEFAULT || 'false'));
 
 // --- MOTOR DE BASE DE DATOS (lowdb@1.0.0) ---
 const low = require('lowdb');
@@ -15,12 +19,18 @@ global.db = low(adapter);
 global.db.defaults({ 
     users: {}, 
     chats: {}, 
-    settings: { grupos: true, autosticker: false },
+    settings: { grupos: defaultGroupsEnabled, autosticker: false },
     vigilancia: {} 
 }).write();
 
 // BLINDAJE DE MEMORIA: Carga inicial
 global.db.data = global.db.getState();
+if (!global.db.data.settings) global.db.data.settings = {};
+if (global.db.data.settings.grupos === undefined) {
+    global.db.data.settings.grupos = defaultGroupsEnabled;
+    global.db.write();
+}
+global.defaultGroupsEnabled = defaultGroupsEnabled;
 console.log('[INFO] Base de datos JSON cargada y lista.');
 
 // ==========================================
@@ -43,6 +53,13 @@ binarios.forEach(bin => {
         try { fs.chmodSync(binPath, '755'); } catch (e) {}
     }
 });
+
+const ffmpegStatus = ensureFfmpegAvailable();
+if (ffmpegStatus.ok) {
+    console.log(`[INFO] FFmpeg detectado en: ${ffmpegStatus.ffmpegPath}`);
+} else {
+    console.warn(`[WARN] ${ffmpegStatus.message}`);
+}
 
 async function iniciarBot() {
     const pluginsDir = path.join(__dirname, 'plugins');
@@ -223,13 +240,20 @@ async function iniciarBot() {
 
         const isGroup = remitente.endsWith('@g.us');
         const settings = global.db.data.settings;
+        const senderJid = extractSenderJid(msg, sock.user?.id);
+        const ownerId = resolveOwnerId(sock.user?.id);
+        const isOwner = isOwnerSender(senderJid, ownerId);
 
         if (isGroup && settings.grupos === false && !/^\.grupo\s+on$/i.test(textoLimpio)) return;
 
-        const ctx = { sock, msg, remitente, textoLimpio, getMediaInfo, downloadContentFromMessage, quoted, msgType };
+        const ctx = { sock, msg, remitente, textoLimpio, getMediaInfo, downloadContentFromMessage, quoted, msgType, senderJid, ownerId, isOwner };
 
         for (const plugin of global.plugins) {
             if (plugin.match && plugin.match(textoLimpio, ctx)) {
+                if (!isOwner) {
+                    await sock.sendMessage(remitente, { text: '⛔ Acceso denegado: este bot está en modo privado y solo el propietario puede usar comandos.' });
+                    break;
+                }
                 try {
                     await plugin.execute(ctx);
                     global.db.write(); 

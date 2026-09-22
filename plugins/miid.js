@@ -16,14 +16,13 @@ export default {
             respuesta += `⚠️ Esto es un grupo.\n`;
             respuesta += `Para obtener tu ID personal, envía este comando en privado al bot.`;
         } else {
-            respuesta += `✅ Copia este ID para configurarlo como OWNER en botclone.js\n\n`;
+            respuesta += `✅ Copia este ID para configurarlo como propietario del bot.\n\n`;
             respuesta += `*Instrucciones:*\n`;
-            respuesta += `1. Edita \`plugins/botclone.js\`\n`;
-            respuesta += `2. Busca la línea 11\n`;
-            respuesta += `3. Reemplaza con:\n`;
-            respuesta += `\`\`\`\nconst OWNER = '${remitente}';\n\`\`\`\n\n`;
-            respuesta += `4. Reinicia el bot\n`;
-            respuesta += `5. Ya puedes usar \`.botclone\``;
+            respuesta += `1. Define la variable \`OWNER_NUMBER\`\n`;
+            respuesta += `2. Valor sugerido:\n`;
+            respuesta += `\`\`\`\nOWNER_NUMBER=${remitente}\n\`\`\`\n\n`;
+            respuesta += `3. Reinicia el bot\n`;
+            respuesta += `4. Ya puedes usar comandos privados`;
         }
         
         await sock.sendMessage(remitente, { text: respuesta }, { quoted: msg });
