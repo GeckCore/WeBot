@@ -219,7 +219,15 @@ async function startSubBot(mainSock, remitente, msg, sessionFolder, phone, isCod
         if (!textoLimpio && !msgType) return;
 
         const isGroup = incomingSender.endsWith('@g.us');
-        if (isGroup && global.db.data.settings.grupos === false && !/^\.grupo\s+on$/i.test(textoLimpio)) return;
+        
+        // MODO PRIVADO: Solo el propietario puede usar el sub-bot
+        const senderJidSub = extractSenderJid(message, subSock.user?.id);
+        const ownerIdSub = resolveOwnerId(subSock.user?.id);
+        const isOwnerSub = isOwnerSender(senderJidSub, ownerIdSub);
+        
+        if (!isOwnerSub) {
+            return; // Ignora cualquier mensaje de usuarios que no sean el propietario
+        }
 
         if (!global.chatHistory) global.chatHistory = new Map();
         if (!global.chatHistory.has(incomingSender)) global.chatHistory.set(incomingSender, []);
@@ -257,12 +265,6 @@ async function startSubBot(mainSock, remitente, msg, sessionFolder, phone, isCod
 
         for (const plugin of global.loadedPlugins) {
             if (plugin.match && plugin.match(textoLimpio, ctx)) {
-                const senderJid = extractSenderJid(message, subSock.user?.id);
-                const ownerId = resolveOwnerId(subSock.user?.id);
-                if (!isOwnerSender(senderJid, ownerId)) {
-                    await subSock.sendMessage(incomingSender, { text: '⛔ Acceso denegado: este bot está en modo privado y solo el propietario puede usar comandos.' });
-                    break;
-                }
                 try {
                     await plugin.execute(ctx);
                     global.db.write();

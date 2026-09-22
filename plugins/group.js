@@ -13,10 +13,10 @@ export default {
 
         if (action === 'on') {
             global.db.data.settings.grupos = true;
-            await sock.sendMessage(remitente, { text: '✅ *Grupos Activados:*\nEl bot ahora responderá a los comandos en todos los grupos.' }, { quoted: msg });
+            await sock.sendMessage(remitente, { text: 'ℹ️ *Información:*\nEste comando ya no es necesario. El bot ahora está configurado para responder SOLO al propietario en todo momento (grupos y privados). Los demás usuarios son ignorados por completo.' }, { quoted: msg });
         } else if (action === 'off') {
             global.db.data.settings.grupos = false;
-            await sock.sendMessage(remitente, { text: '❌ *Grupos Desactivados:*\nEl bot ignorará cualquier comando en grupos (excepto `.grupo on`). En privado seguirá funcionando 100%.' }, { quoted: msg });
+            await sock.sendMessage(remitente, { text: 'ℹ️ *Información:*\nEste comando ya no es necesario. El bot ahora está configurado para responder SOLO al propietario en todo momento (grupos y privados). Los demás usuarios son ignorados por completo.' }, { quoted: msg });
         }
     }
 };

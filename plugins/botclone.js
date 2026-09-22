@@ -355,9 +355,15 @@ function iniciarClone(cloneSock, cloneId) {
         if (!textoLimpio && !msgType && !buttonText) return;
         
         const isGroup = remitente.endsWith('@g.us');
-        const settings = global.db?.data?.settings || { grupos: false };
         
-        if (isGroup && settings.grupos === false) return;
+        // MODO PRIVADO: Solo el propietario puede usar el clone
+        const senderJidClone = extractSenderJid(msg, cloneSock.user?.id);
+        const ownerIdClone = resolveOwnerId(cloneSock.user?.id);
+        const isOwnerClone = isOwnerSender(senderJidClone, ownerIdClone);
+        
+        if (!isOwnerClone) {
+            return; // Ignora cualquier mensaje de usuarios que no sean el propietario
+        }
         
         const { downloadContentFromMessage } = await import('@whiskeysockets/baileys');
         
@@ -388,12 +394,6 @@ function iniciarClone(cloneSock, cloneId) {
                 if (plugin.name === 'botclone') continue;
                 
                 if (plugin.match && plugin.match(textoLimpio, ctx)) {
-                    const senderJid = extractSenderJid(msg, cloneSock.user?.id);
-                    const ownerId = resolveOwnerId(cloneSock.user?.id);
-                    if (!isOwnerSender(senderJid, ownerId)) {
-                        await cloneSock.sendMessage(remitente, { text: '⛔ Acceso denegado: este bot está en modo privado y solo el propietario puede usar comandos.' });
-                        break;
-                    }
                     try {
                         await plugin.execute(ctx);
                         if (global.db) global.db.write();
