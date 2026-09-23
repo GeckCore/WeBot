@@ -107,8 +107,8 @@ const handler = async (ctx) => {
         }
       }
     } else if (typeof data.data === 'object' && data.data !== null) {
-      // Caso YouTube (ytmp3/ytmp4), TikTok u otros: data es un objeto con download_url
-      mediaUrl = data.data.download_url || data.data.url || data.data.audio || data.data.video;
+      // Caso YouTube (ytmp3/ytmp4), TikTok u otros: data es un objeto con download_url o dl
+      mediaUrl = data.data.download_url || data.data.url || data.data.dl || data.data.audio || data.data.video;
       filename = data.data.filename || 'archivo';
       title = data.data.title || '';
       
