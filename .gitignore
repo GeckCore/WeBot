@@ -1,3 +1,1 @@
-plugins/download.js has been modified, but it's a source code file (.js). Since there are no build artifacts, dependency directories, temporary files, or other ignorable items in the changes, and only a source code file was modified, no entries need to be added to .gitignore.
-
-(empty)
+Nothing to output - the modified file 'plugins/download.js' is a source code file and no build artifacts, dependencies, or temporary files were detected in the changes.
