@@ -160,7 +160,7 @@ async function processDownload(m, conn, url) {
 
 handler.help = ['(link)'];
 handler.tags = ['downloader'];
-handler.command = /^$/; // Se activa por contenido (URL), no por comando
+handler.command = /^(.*)$/; // Captura CUALQUIER mensaje para filtrar internamente
 handler.exp = 0;
 handler.limit = false;
 
