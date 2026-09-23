@@ -49,7 +49,7 @@ const serviceMap = {
 const audioOnlyServices = ['/dl/tiktokmp3', '/dl/ytmp3'];
 
 async function processDownload(m, conn) {
-    let text = m.text.trim();
+    let text = (m.text || '').trim();
     
     // Buscar URL en el mensaje
     let urlMatch = text.match(/https?:\/\/[^\s<>"{}|\\^`\[\]]+/i);
@@ -148,18 +148,17 @@ async function processDownload(m, conn) {
     }
 }
 
-let handler = {};
-
-// Función match para detectar URLs automáticamente
-handler.match = (text, ctx) => {
-    if (!text) return false;
-    const urlRegex = /https?:\/\/[^\s<>"{}|\\^`\[\]]+/i;
-    return urlRegex.test(text);
+export default {
+    name: 'download',
+    // Función match para detectar URLs automáticamente
+    match: (text, ctx) => {
+        if (!text) return false;
+        const urlRegex = /https?:\/\/[^\s<>"{}|\\^`\[\]]+/i;
+        return urlRegex.test(text);
+    },
+    
+    // Función execute que llama al procesador
+    execute: async ({ sock, msg }) => {
+        await processDownload(msg, sock);
+    }
 };
-
-// Función execute que llama al procesador
-handler.execute = async (ctx) => {
-    await processDownload(ctx.msg, ctx.sock);
-};
-
-export default handler;
