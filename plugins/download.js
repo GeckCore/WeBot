@@ -48,7 +48,7 @@ const serviceMap = {
 // Servicios que solo devuelven audio
 const audioOnlyServices = ['/dl/tiktokmp3', '/dl/ytmp3'];
 
-let handler = async (m, { conn }) => {
+async function processDownload(m, conn) {
     let text = m.text.trim();
     
     // Buscar URL en el mensaje
@@ -146,8 +146,20 @@ let handler = async (m, { conn }) => {
         console.log(`[DOWNLOAD ERROR] ${endpoint}:`, error.message);
         // Ignorar errores silenciosamente
     }
+}
+
+let handler = {};
+
+// Función match para detectar URLs automáticamente
+handler.match = (text, ctx) => {
+    if (!text) return false;
+    const urlRegex = /https?:\/\/[^\s<>"{}|\\^`\[\]]+/i;
+    return urlRegex.test(text);
 };
 
-handler.customPrefix = /^https?:\/\//i;
-handler.command = new RegExp;
+// Función execute que llama al procesador
+handler.execute = async (ctx) => {
+    await processDownload(ctx.msg, ctx.sock);
+};
+
 export default handler;
