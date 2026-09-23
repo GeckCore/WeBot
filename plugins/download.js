@@ -1,79 +1,85 @@
 import fetch from 'node-fetch';
 
+let handler = async (m, { conn, usedPrefix, command }) => {
+    // 1. OBTENER TEXTO DEL MENSAJE
+    let text = m.text ? m.text.trim() : '';
+    
+    // Si no hay texto, ignorar silenciosamente
+    if (!text) return;
+
+    // 2. DETECCIÓN DE ENLACE (El "prefijo" implícito es http/https/www)
+    let urlRegex = /(https?:\/\/[^\s<>\"{}|\\^`\[\]]+)|(www\.[^\s<>\"{}|\\^`\[\]]+)/gi;
+    let match = text.match(urlRegex);
+    
+    // Si no hay URL en el mensaje, este plugin NO hace nada
+    if (!match) return;
+
+    let url = match[0];
+
+    // 3. VERIFICACIÓN ESTRICTA DE PROPIETARIO
+    // Solo el propietario puede usar esta función
+    let ownerNumbers = global.owner || [];
+    let isOwner = false;
+    
+    if (Array.isArray(ownerNumbers)) {
+        isOwner = ownerNumbers.some(num => {
+            let n = typeof num === 'object' ? num[0] : num;
+            return m.sender.includes(n.replace(/[^0-9]/g, ''));
+        });
+    }
+    
+    // También verificar si es el propio bot o modo self
+    if (m.sender === conn.user.jid) isOwner = true;
+    if (global.opts && global.opts['self']) isOwner = true;
+    
+    // Si NO es el propietario, IGNORAR COMPLETAMENTE (sin logs, sin respuesta)
+    if (!isOwner) return;
+
+    // 4. PROCESAR DESCARGA
+    await processDownload(m, conn, url);
+};
+
 const API_BASE = 'https://api.evogb.org';
 const API_KEY = 'geckcore';
 
-// Mapeo de dominios a endpoints de la API (formato: /dl/servicio)
 const serviceMap = {
-    // Instagram
     'instagram.com': '/dl/instagram',
     'instagr.am': '/dl/instagram',
-    
-    // MediaFire
     'mediafire.com': '/dl/mediafire',
-    
-    // Pinterest
     'pinterest.com': '/dl/pinterest',
     'pin.it': '/dl/pinterest',
-    
-    // SoundCloud
     'soundcloud.com': '/dl/soundcloud',
     'on.soundcloud.com': '/dl/soundcloud',
-    
-    // Spotify
     'spotify.com': '/dl/spotify',
     'open.spotify.com': '/dl/spotify',
-    
-    // TeraBox
     'terabox.com': '/dl/terabox',
     '1024tera.com': '/dl/terabox',
-    
-    // Threads
     'threads.net': '/dl/threads',
-    
-    // TikTok
     'tiktok.com': '/dl/tiktok',
     'vm.tiktok.com': '/dl/tiktok',
     'vt.tiktok.com': '/dl/tiktok',
-    
-    // Twitter / X
     'twitter.com': '/dl/twitter',
     'x.com': '/dl/twitter',
-    
-    // YouTube - diferentes endpoints según tipo
     'youtube.com': '/dl/youtube',
     'youtu.be': '/dl/youtube',
 };
 
-// Servicios que solo devuelven audio
 const audioOnlyServices = ['/dl/tiktokmp3', '/dl/ytmp3'];
 
-async function processDownload(m, conn) {
-    let text = (m.text || '').trim();
-    
-    // Buscar URL en el mensaje
-    let urlMatch = text.match(/https?:\/\/[^\s<>"{}|\\^`\[\]]+/i);
-    if (!urlMatch) return;
-    
-    let url = urlMatch[0];
+async function processDownload(m, conn, url) {
     let parsedUrl;
-    
     try {
         parsedUrl = new URL(url);
     } catch {
-        return; // URL inválida, ignorar
+        return;
     }
     
     let hostname = parsedUrl.hostname.replace(/^www\./, '').toLowerCase();
-    
-    // Detectar servicio
     let endpoint = null;
     
-    // Búsqueda exacta
     if (serviceMap[hostname]) {
         endpoint = serviceMap[hostname];
     } else {
-        // Búsqueda parcial para subdominios
         for (const [domain, ep] of Object.entries(serviceMap)) {
             if (hostname.endsWith('.' + domain) || hostname === domain) {
                 endpoint = ep;
@@ -82,16 +88,13 @@ async function processDownload(m, conn) {
         }
     }
     
-    if (!endpoint) {
-        return; // Servicio no soportado, ignorar silenciosamente
-    }
+    if (!endpoint) return;
     
-    // Construir URL de la API con parámetros correctos (GET con query params)
     let apiUrl = `${API_BASE}${endpoint}?key=${encodeURIComponent(API_KEY)}&url=${encodeURIComponent(url)}`;
     
-    console.log(`[DOWNLOAD] API: ${apiUrl}`);
-    
     try {
+        await m.reply(`📥 Descargando...`);
+        
         let res = await fetch(apiUrl, {
             headers: {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
@@ -101,22 +104,21 @@ async function processDownload(m, conn) {
         let json = await res.json();
         
         if (!res.ok || !json.status || !json.data) {
-            console.log(`[DOWNLOAD] Error API ${endpoint}:`, json.message || json);
-            return; // Error, ignorar silenciosamente
+            await m.reply(`❌ Error: ${json.message || 'Enlace inválido o contenido eliminado'}`);
+            return;
         }
         
         let data = json.data;
-        let downloadUrl = null;
-        let filename = 'download';
         let isAudio = audioOnlyServices.includes(endpoint);
         
-        // Caso 1: data es array (ej. Instagram con múltiples medios)
+        // Caso 1: data es array
         if (Array.isArray(data)) {
             for (let item of data) {
-                downloadUrl = item.url || item.download_url;
+                let downloadUrl = item.url || item.download_url;
                 if (downloadUrl) {
-                    if (item.type === 'audio') isAudio = true;
-                    filename = item.filename || `download_${Date.now()}.${isAudio ? 'mp3' : 'mp4'}`;
+                    let fileIsAudio = item.type === 'audio' || isAudio;
+                    let ext = fileIsAudio ? 'mp3' : 'mp4';
+                    let filename = item.filename || `download_${Date.now()}.${ext}`;
                     await conn.sendFile(m.chat, downloadUrl, filename, '', m);
                 }
             }
@@ -125,40 +127,41 @@ async function processDownload(m, conn) {
         
         // Caso 2: data es objeto
         if (typeof data === 'object') {
-            downloadUrl = data.download_url || data.url || data.dl_url || data.link;
-            filename = data.filename || `download_${Date.now()}.${isAudio ? 'mp3' : 'mp4'}`;
+            let downloadUrl = data.download_url || data.url || data.dl_url || data.link;
             
-            // Si hay múltiples calidades, priorizar HD o la primera disponible
             if (!downloadUrl && (data.hd || data.sd || data.no_watermark)) {
                 downloadUrl = data.hd || data.sd || data.no_watermark;
             }
+            
+            if (!downloadUrl) {
+                // Buscar cualquier URL en el objeto
+                for (let key of Object.keys(data)) {
+                    if (typeof data[key] === 'string' && data[key].startsWith('http')) {
+                        downloadUrl = data[key];
+                        break;
+                    }
+                }
+            }
+            
+            if (downloadUrl) {
+                let ext = isAudio ? 'mp3' : 'mp4';
+                let filename = data.filename || `download_${Date.now()}.${ext}`;
+                await conn.sendFile(m.chat, downloadUrl, filename, '', m);
+            } else {
+                await m.reply('❌ No se encontró enlace de descarga');
+            }
         }
-        
-        if (!downloadUrl) {
-            console.log(`[DOWNLOAD] No se encontró URL en:`, data);
-            return;
-        }
-        
-        console.log(`[DOWNLOAD] Enviando: ${downloadUrl}`);
-        await conn.sendFile(m.chat, downloadUrl, filename, '', m);
         
     } catch (error) {
-        console.log(`[DOWNLOAD ERROR] ${endpoint}:`, error.message);
-        // Ignorar errores silenciosamente
+        console.error(`[DOWNLOAD ERROR]:`, error.message);
+        await m.reply(`❌ Error: ${error.message}`);
     }
 }
 
-export default {
-    name: 'download',
-    // Función match para detectar URLs automáticamente
-    match: (text, ctx) => {
-        if (!text) return false;
-        const urlRegex = /https?:\/\/[^\s<>"{}|\\^`\[\]]+/i;
-        return urlRegex.test(text);
-    },
-    
-    // Función execute que llama al procesador
-    execute: async ({ sock, msg }) => {
-        await processDownload(msg, sock);
-    }
-};
+handler.help = ['(link)'];
+handler.tags = ['downloader'];
+handler.command = /^$/; // Se activa por contenido (URL), no por comando
+handler.exp = 0;
+handler.limit = false;
+
+export default handler;
