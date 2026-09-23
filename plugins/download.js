@@ -1,153 +1,173 @@
 import fetch from 'node-fetch';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
-export default {
-    name: 'download',
-    
-    // Match: Solo reacciona si hay una URL en el mensaje Y el remitente es el propietario
-    match: (text, ctx) => {
-        if (!text || !text.trim()) return false;
-        
-        // Verificar si hay una URL
-        let urlRegex = /(https?:\/\/[^\s<>"{}|\\^`\[\]]+)|(www\.[^\s<>"{}|\\^`\[\]]+)/gi;
-        if (!urlRegex.test(text)) return false;
-        
-        // Solo ejecutar si es el propietario
-        return ctx && ctx.isOwner === true;
-    },
-    
-    execute: async ({ sock, remitente, textoLimpio, isOwner }) => {
-        // Doble verificación de propietario
-        if (!isOwner) return;
-        
-        if (!textoLimpio || !textoLimpio.trim()) return;
-        
-        // Extraer URL del mensaje
-        let urlRegex = /(https?:\/\/[^\s<>"{}|\\^`\[\]]+)|(www\.[^\s<>"{}|\\^`\[\]]+)/gi;
-        let match = textoLimpio.match(urlRegex);
-        
-        if (!match) return;
-        
-        let url = match[0].trim();
-        
-        await processDownload(sock, remitente, url);
-    }
-};
-
-const API_BASE = 'https://api.evogb.org';
+// Configuración
 const API_KEY = 'geckcore';
+const API_BASE = 'https://api.evogb.org';
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const serviceMap = {
+// Mapeo de dominios a endpoints de la API
+const SERVICES = {
     'instagram.com': '/dl/instagram',
     'instagr.am': '/dl/instagram',
-    'mediafire.com': '/dl/mediafire',
-    'pinterest.com': '/dl/pinterest',
-    'pin.it': '/dl/pinterest',
-    'soundcloud.com': '/dl/soundcloud',
-    'on.soundcloud.com': '/dl/soundcloud',
-    'spotify.com': '/dl/spotify',
-    'open.spotify.com': '/dl/spotify',
-    'terabox.com': '/dl/terabox',
-    '1024tera.com': '/dl/terabox',
-    'threads.net': '/dl/threads',
     'tiktok.com': '/dl/tiktok',
     'vm.tiktok.com': '/dl/tiktok',
     'vt.tiktok.com': '/dl/tiktok',
+    'youtube.com': '/dl/ytmp4',
+    'youtu.be': '/dl/ytmp4',
+    'music.youtube.com': '/dl/ytmp4', // Redirigimos a video o podrías usar ytmp3
     'twitter.com': '/dl/twitter',
     'x.com': '/dl/twitter',
-    'youtube.com': '/dl/youtube',
-    'youtu.be': '/dl/youtube',
+    'facebook.com': '/dl/facebook',
+    'fb.watch': '/dl/facebook',
+    'pinterest.com': '/dl/pinterest',
+    'pin.it': '/dl/pinterest',
+    'soundcloud.com': '/dl/soundcloud',
+    'spotify.com': '/dl/spotify',
+    'mediafire.com': '/dl/mediafire',
+    'terabox.com': '/dl/terabox',
+    '1024tera.com': '/dl/terabox',
+    'threads.net': '/dl/threads'
 };
 
-const audioOnlyServices = ['/dl/tiktokmp3', '/dl/ytmp3'];
-
-async function processDownload(sock, remitente, url) {
-    let parsedUrl;
+// Función auxiliar para detectar servicio
+function getService(url) {
     try {
-        parsedUrl = new URL(url);
-    } catch {
+        const urlObj = new URL(url);
+        const domain = urlObj.hostname.replace('www.', '');
+        
+        // Casos especiales para MP3
+        if (url.includes('spotify.com') || url.includes('open.spotify.com')) return { endpoint: '/dl/spotify', type: 'audio' };
+        if (url.includes('soundcloud.com')) return { endpoint: '/dl/soundcloud', type: 'audio' };
+        if (url.includes('music.youtube.com') && (url.includes('list=') || !url.includes('watch'))) return { endpoint: '/dl/youtubeplay-private', type: 'audio' }; // Intento para playlists o música
+        if (url.match(/(youtube\.com|youtu\.be)/) && url.includes('&list=')) return { endpoint: '/dl/youtubeplay-private', type: 'audio' };
+        
+        // Detección normal
+        for (const [key, endpoint] of Object.entries(SERVICES)) {
+            if (domain.includes(key)) {
+                // Excepción para YouTube Music si se quiere video por defecto
+                if (domain.includes('music.youtube.com') && endpoint === '/dl/ytmp4') return { endpoint, type: 'video' };
+                return { endpoint, type: 'video' }; // Default video para redes sociales
+            }
+        }
+    } catch (e) {
+        return null;
+    }
+    return null;
+}
+
+let handler = async (m, { conn }) => {
+    // 1. Verificar si es el propietario (REQUISITO OBLIGATORIO)
+    // Ajusta el número si tu configuración global de owner es diferente
+    const ownerNumber = global.owner ? (Array.isArray(global.owner) ? global.owner[0] : global.owner) : '';
+    const sender = m.sender.split('@')[0];
+    
+    if (sender !== ownerNumber) {
+        // Si no es el dueño, ignorar completamente (ni siquiera leer el mensaje para logs de download)
         return;
     }
+
+    const text = m.text || '';
     
-    let hostname = parsedUrl.hostname.replace(/^www\./, '').toLowerCase();
-    let endpoint = null;
-    
-    if (serviceMap[hostname]) {
-        endpoint = serviceMap[hostname];
-    } else {
-        for (const [domain, ep] of Object.entries(serviceMap)) {
-            if (hostname.endsWith('.' + domain) || hostname === domain) {
-                endpoint = ep;
-                break;
-            }
-        }
-    }
-    
-    if (!endpoint) return;
-    
-    let apiUrl = `${API_BASE}${endpoint}?key=${encodeURIComponent(API_KEY)}&url=${encodeURIComponent(url)}`;
-    
-    try {
-        await sock.sendMessage(remitente, { text: '📥 Descargando...' });
+    // 2. Detectar URL en el mensaje
+    const urlRegex = /(https?:\/\/[^\s]+)/gi;
+    const urls = text.match(urlRegex);
+
+    if (!urls) return;
+
+    for (const url of urls) {
+        const service = getService(url);
+        if (!service) continue; // Ignorar URLs no soportadas
+
+        const { endpoint, type } = service;
         
-        let res = await fetch(apiUrl, {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }
-        });
-        
-        let json = await res.json();
-        
-        if (!res.ok || !json.status || !json.data) {
-            await sock.sendMessage(remitente, { text: `❌ Error: ${json.message || 'Enlace inválido o contenido eliminado'}` });
-            return;
-        }
-        
-        let data = json.data;
-        let isAudio = audioOnlyServices.includes(endpoint);
-        
-        // Caso 1: data es array
-        if (Array.isArray(data)) {
-            for (let item of data) {
-                let downloadUrl = item.url || item.download_url;
-                if (downloadUrl) {
-                    let fileIsAudio = item.type === 'audio' || isAudio;
-                    let ext = fileIsAudio ? 'mp3' : 'mp4';
-                    let filename = item.filename || `download_${Date.now()}.${ext}`;
-                    await sock.sendFile(remitente, downloadUrl, filename, '', null);
-                }
-            }
-            return;
-        }
-        
-        // Caso 2: data es objeto
-        if (typeof data === 'object') {
-            let downloadUrl = data.download_url || data.url || data.dl_url || data.link;
+        // Notificación de inicio
+        await conn.sendMessage(m.chat, { text: '📥 Descargando...' }, { quoted: m });
+
+        try {
+            // 3. Petición a la API
+            const apiUrl = `${API_BASE}${endpoint}?key=${API_KEY}&url=${encodeURIComponent(url)}`;
             
-            if (!downloadUrl && (data.hd || data.sd || data.no_watermark)) {
-                downloadUrl = data.hd || data.sd || data.no_watermark;
+            const response = await fetch(apiUrl, {
+                timeout: 30000 // 30 segundos timeout
+            });
+
+            // Validar que la respuesta sea JSON
+            const contentType = response.headers.get("content-type");
+            if (!contentType || !contentType.includes("application/json")) {
+                throw new Error("La API no respondió con JSON válido (posible bloqueo o mantenimiento).");
             }
-            
-            if (!downloadUrl) {
-                // Buscar cualquier URL en el objeto
-                for (let key of Object.keys(data)) {
-                    if (typeof data[key] === 'string' && data[key].startsWith('http')) {
-                        downloadUrl = data[key];
-                        break;
-                    }
-                }
+
+            const json = await response.json();
+
+            if (!json.status || !json.data) {
+                throw new Error(json.message || "Error desconocido de la API o contenido no disponible.");
             }
+
+            // 4. Procesar datos según estructura de respuesta (Array u Objeto)
+            let mediaUrl = null;
+            let mimeType = 'application/octet-stream';
             
-            if (downloadUrl) {
-                let ext = isAudio ? 'mp3' : 'mp4';
-                let filename = data.filename || `download_${Date.now()}.${ext}`;
-                await sock.sendFile(remitente, downloadUrl, filename, '', null);
+            if (Array.isArray(json.data)) {
+                // Respuesta tipo Instagram (varios videos/fotos)
+                mediaUrl = json.data[0].url;
+                if (json.data[0].type === 'photo') mimeType = 'image/jpeg';
+                else mimeType = 'video/mp4';
+            } else if (json.data.download_url) {
+                // Respuesta tipo MediaFire/TeraBox/Genérica
+                mediaUrl = json.data.download_url;
+            } else if (json.data.url) {
+                // Respuesta directa
+                mediaUrl = json.data.url;
+            }
+
+            if (!mediaUrl) throw new Error("No se encontró el enlace de descarga en la respuesta.");
+
+            // 5. Descargar archivo temporalmente (para controlar tamaño y mimetype)
+            const fileRes = await fetch(mediaUrl);
+            if (!fileRes.ok) throw new Error("Error descargando el archivo desde el CDN.");
+            
+            const buffer = await fileRes.buffer();
+            
+            // Límite de seguridad (ej. 100MB)
+            if (buffer.length > 100 * 1024 * 1024) {
+                return conn.sendMessage(m.chat, { text: '⚠️ El archivo es demasiado grande (>100MB).' }, { quoted: m });
+            }
+
+            // 6. Enviar usando sendMessage (Método correcto para Baileys actual)
+            const msgOptions = {};
+            
+            if (type === 'audio' || mimeType.includes('audio')) {
+                msgOptions.audio = buffer;
+                msgOptions.mimetype = 'audio/mp4'; // WhatsApp prefiere mp4 para audio
+                msgOptions.ptt = false;
+            } else if (mimeType.includes('image')) {
+                msgOptions.image = buffer;
+                msgOptions.caption = '✨ Aquí tienes tu imagen';
+                msgOptions.mimetype = 'image/jpeg';
             } else {
-                await sock.sendMessage(remitente, { text: '❌ No se encontró enlace de descarga' });
+                // Video por defecto
+                msgOptions.video = buffer;
+                msgOptions.caption = '✨ Aquí tienes tu video';
+                msgOptions.mimetype = 'video/mp4';
             }
+
+            await conn.sendMessage(m.chat, msgOptions, { quoted: m });
+
+        } catch (error) {
+            console.error(`[DOWNLOAD ERROR]: ${error.message}`);
+            await conn.sendMessage(m.chat, { 
+                text: `❌ Error: ${error.message}` 
+            }, { quoted: m });
         }
-        
-    } catch (error) {
-        console.error(`[DOWNLOAD ERROR]:`, error.message);
-        await sock.sendMessage(remitente, { text: `❌ Error: ${error.message}` });
     }
-}
+};
+
+handler.help = ['download'];
+handler.tags = ['downloader'];
+handler.command = /^(download|dl)$/i; // No estrictamente necesario ya que detecta links automáticos
+handler.exp = 0;
+
+export default handler;
