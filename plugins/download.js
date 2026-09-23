@@ -85,20 +85,45 @@ const handler = async (ctx) => {
     let mediaUrl = null;
     let type = 'video'; // Default
     let filename = 'archivo';
+    let title = '';
     
-    // La API EvoGB devuelve: { status, creator, data: { download_url, filename } }
-    if (typeof data.data === 'object' && data.data !== null) {
+    // La API EvoGB puede devolver diferentes estructuras:
+    // - Instagram: { data: [{ type: 'video', url: '...', thumbnail: '...' }] }
+    // - YouTube: { data: { url: '...', title: '...', ... } } o { data: { download_url: '...', filename: '...' } }
+    
+    if (Array.isArray(data.data)) {
+      // Caso Instagram: data es un array de medios
+      const firstItem = data.data[0];
+      if (firstItem) {
+        mediaUrl = firstItem.url || firstItem.download_url;
+        type = firstItem.type === 'image' ? 'image' : 'video';
+        filename = type === 'image' ? 'imagen.jpg' : 'video.mp4';
+        if (firstItem.thumbnail) {
+          // Guardar thumbnail para posible uso
+          console.log('[DOWNLOAD] Thumbnail encontrado:', firstItem.thumbnail);
+        }
+      }
+    } else if (typeof data.data === 'object' && data.data !== null) {
+      // Caso YouTube u otros: data es un objeto
       mediaUrl = data.data.download_url || data.data.url || data.data.audio || data.data.video;
       filename = data.data.filename || 'archivo';
+      title = data.data.title || '';
       
       // Determinar tipo según endpoint o datos
       if (endpoint.includes('/ytmp3') || endpoint.includes('/soundcloud') || endpoint.includes('/spotify') || 
           (data.data.type && data.data.type === 'audio')) {
         type = 'audio';
+        filename = filename.endsWith('.mp3') ? filename : `${filename}.mp3`;
       } else if (endpoint.includes('/instagram') && data.data.type === 'image') {
         type = 'image';
+        filename = filename.endsWith('.jpg') ? filename : `${filename}.jpg`;
       } else if (data.data.type === 'image') {
         type = 'image';
+        filename = filename.endsWith('.jpg') ? filename : `${filename}.jpg`;
+      } else if (endpoint.includes('/youtube') || endpoint.includes('/ytmp3')) {
+        // YouTube videos por defecto
+        type = 'video';
+        filename = filename.endsWith('.mp4') ? filename : `${filename}.mp4`;
       }
     }
 
