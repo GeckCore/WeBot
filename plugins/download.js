@@ -1,42 +1,36 @@
 import fetch from 'node-fetch';
 
-let handler = async (m, { conn, usedPrefix, command }) => {
-    // 1. OBTENER TEXTO DEL MENSAJE
-    let text = m.text ? m.text.trim() : '';
+export default {
+    name: 'download',
     
-    // Si no hay texto, ignorar silenciosamente
-    if (!text) return;
-
-    // 2. DETECCIÓN DE ENLACE (El "prefijo" implícito es http/https/www)
-    let urlRegex = /(https?:\/\/[^\s<>\"{}|\\^`\[\]]+)|(www\.[^\s<>\"{}|\\^`\[\]]+)/gi;
-    let match = text.match(urlRegex);
+    // Match: Solo reacciona si hay una URL en el mensaje Y el remitente es el propietario
+    match: (text, ctx) => {
+        if (!text || !text.trim()) return false;
+        
+        // Verificar si hay una URL
+        let urlRegex = /(https?:\/\/[^\s<>"{}|\\^`\[\]]+)|(www\.[^\s<>"{}|\\^`\[\]]+)/gi;
+        if (!urlRegex.test(text)) return false;
+        
+        // Solo ejecutar si es el propietario
+        return ctx && ctx.isOwner === true;
+    },
     
-    // Si no hay URL en el mensaje, este plugin NO hace nada
-    if (!match) return;
-
-    let url = match[0];
-
-    // 3. VERIFICACIÓN ESTRICTA DE PROPIETARIO
-    // Solo el propietario puede usar esta función
-    let ownerNumbers = global.owner || [];
-    let isOwner = false;
-    
-    if (Array.isArray(ownerNumbers)) {
-        isOwner = ownerNumbers.some(num => {
-            let n = typeof num === 'object' ? num[0] : num;
-            return m.sender.includes(n.replace(/[^0-9]/g, ''));
-        });
+    execute: async ({ sock, remitente, textoLimpio, isOwner }) => {
+        // Doble verificación de propietario
+        if (!isOwner) return;
+        
+        if (!textoLimpio || !textoLimpio.trim()) return;
+        
+        // Extraer URL del mensaje
+        let urlRegex = /(https?:\/\/[^\s<>"{}|\\^`\[\]]+)|(www\.[^\s<>"{}|\\^`\[\]]+)/gi;
+        let match = textoLimpio.match(urlRegex);
+        
+        if (!match) return;
+        
+        let url = match[0].trim();
+        
+        await processDownload(sock, remitente, url);
     }
-    
-    // También verificar si es el propio bot o modo self
-    if (m.sender === conn.user.jid) isOwner = true;
-    if (global.opts && global.opts['self']) isOwner = true;
-    
-    // Si NO es el propietario, IGNORAR COMPLETAMENTE (sin logs, sin respuesta)
-    if (!isOwner) return;
-
-    // 4. PROCESAR DESCARGA
-    await processDownload(m, conn, url);
 };
 
 const API_BASE = 'https://api.evogb.org';
@@ -66,7 +60,7 @@ const serviceMap = {
 
 const audioOnlyServices = ['/dl/tiktokmp3', '/dl/ytmp3'];
 
-async function processDownload(m, conn, url) {
+async function processDownload(sock, remitente, url) {
     let parsedUrl;
     try {
         parsedUrl = new URL(url);
@@ -93,7 +87,7 @@ async function processDownload(m, conn, url) {
     let apiUrl = `${API_BASE}${endpoint}?key=${encodeURIComponent(API_KEY)}&url=${encodeURIComponent(url)}`;
     
     try {
-        await m.reply(`📥 Descargando...`);
+        await sock.sendMessage(remitente, { text: '📥 Descargando...' });
         
         let res = await fetch(apiUrl, {
             headers: {
@@ -104,7 +98,7 @@ async function processDownload(m, conn, url) {
         let json = await res.json();
         
         if (!res.ok || !json.status || !json.data) {
-            await m.reply(`❌ Error: ${json.message || 'Enlace inválido o contenido eliminado'}`);
+            await sock.sendMessage(remitente, { text: `❌ Error: ${json.message || 'Enlace inválido o contenido eliminado'}` });
             return;
         }
         
@@ -119,7 +113,7 @@ async function processDownload(m, conn, url) {
                     let fileIsAudio = item.type === 'audio' || isAudio;
                     let ext = fileIsAudio ? 'mp3' : 'mp4';
                     let filename = item.filename || `download_${Date.now()}.${ext}`;
-                    await conn.sendFile(m.chat, downloadUrl, filename, '', m);
+                    await sock.sendFile(remitente, downloadUrl, filename, '', null);
                 }
             }
             return;
@@ -146,22 +140,14 @@ async function processDownload(m, conn, url) {
             if (downloadUrl) {
                 let ext = isAudio ? 'mp3' : 'mp4';
                 let filename = data.filename || `download_${Date.now()}.${ext}`;
-                await conn.sendFile(m.chat, downloadUrl, filename, '', m);
+                await sock.sendFile(remitente, downloadUrl, filename, '', null);
             } else {
-                await m.reply('❌ No se encontró enlace de descarga');
+                await sock.sendMessage(remitente, { text: '❌ No se encontró enlace de descarga' });
             }
         }
         
     } catch (error) {
         console.error(`[DOWNLOAD ERROR]:`, error.message);
-        await m.reply(`❌ Error: ${error.message}`);
+        await sock.sendMessage(remitente, { text: `❌ Error: ${error.message}` });
     }
 }
-
-handler.help = ['(link)'];
-handler.tags = ['downloader'];
-handler.command = /^(.*)$/; // Captura CUALQUIER mensaje para filtrar internamente
-handler.exp = 0;
-handler.limit = false;
-
-export default handler;
