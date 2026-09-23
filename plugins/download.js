@@ -1,7 +1,7 @@
 import fetch from 'node-fetch';
 
 const handler = async (ctx) => {
-  const { sock, msg, remitente, textoLimpio, quoted, senderJid, ownerId } = ctx;
+  const { sock, msg, remitente, textoLimpio, quoted, senderJid, ownerId, isOwner } = ctx;
   
   // 1. Obtener el texto del mensaje
   let text = textoLimpio || '';
@@ -14,10 +14,8 @@ const handler = async (ctx) => {
   
   let url = urls[0]; // Tomar el primer link encontrado
   
-  // 3. Verificar si es el propietario
-  let ownerNumber = ownerId ? ownerId.split('@')[0] : '';
-  
-  if (senderJid !== ownerNumber.replace(/[^0-9]/g, '')) {
+  // 3. Verificar si es el propietario (usando isOwner del contexto)
+  if (!isOwner) {
     return; // Ignorar silenciosamente si no es el dueño
   }
 
