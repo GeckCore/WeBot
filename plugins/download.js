@@ -21,16 +21,18 @@ const handler = async (ctx) => {
 
   // 4. Determinar el tipo de servicio y endpoint según API EvoGB
   let endpoint = null;
+  let isAudioOnly = false;
   const lowerUrl = url.toLowerCase();
 
   if (lowerUrl.includes('instagram.com') || lowerUrl.includes('instagr.am')) endpoint = 'dl/instagram';
   else if (lowerUrl.includes('tiktok.com')) endpoint = 'dl/tiktok';
-  else if (lowerUrl.includes('youtube.com/watch') || lowerUrl.includes('youtu.be/')) {
-    // YouTube video normal
-    endpoint = 'dl/youtubeplay';
-  } else if (lowerUrl.includes('music.youtube.com')) {
-    // YouTube Music - usar ytmp3
+  else if (lowerUrl.includes('music.youtube.com')) {
+    // YouTube Music - usar ytmp3 (debe ir ANTES que youtube.com/watch)
     endpoint = 'dl/ytmp3';
+    isAudioOnly = true;
+  } else if (lowerUrl.includes('youtube.com/watch') || lowerUrl.includes('youtu.be/')) {
+    // YouTube video normal - usar ytmp4
+    endpoint = 'dl/ytmp4';
   } else if (lowerUrl.includes('twitter.com') || lowerUrl.includes('x.com')) endpoint = 'dl/twitter';
   else if (lowerUrl.includes('facebook.com') || lowerUrl.includes('fb.watch')) endpoint = 'dl/facebook';
   else if (lowerUrl.includes('pinterest.com')) endpoint = 'dl/pinterest';
@@ -89,7 +91,8 @@ const handler = async (ctx) => {
     
     // La API EvoGB puede devolver diferentes estructuras:
     // - Instagram: { data: [{ type: 'video', url: '...', thumbnail: '...' }] }
-    // - YouTube: { data: { url: '...', title: '...', ... } } o { data: { download_url: '...', filename: '...' } }
+    // - TikTok: { data: { download_url: '...', filename: 'media.mp4' } }
+    // - YouTube (ytmp3/ytmp4): { data: { download_url: '...', filename: 'media.mp3' o 'media.mp4' } }
     
     if (Array.isArray(data.data)) {
       // Caso Instagram: data es un array de medios
@@ -104,13 +107,13 @@ const handler = async (ctx) => {
         }
       }
     } else if (typeof data.data === 'object' && data.data !== null) {
-      // Caso YouTube u otros: data es un objeto
+      // Caso YouTube (ytmp3/ytmp4), TikTok u otros: data es un objeto con download_url
       mediaUrl = data.data.download_url || data.data.url || data.data.audio || data.data.video;
       filename = data.data.filename || 'archivo';
       title = data.data.title || '';
       
       // Determinar tipo según endpoint o datos
-      if (endpoint.includes('/ytmp3') || endpoint.includes('/soundcloud') || endpoint.includes('/spotify') || 
+      if (isAudioOnly || endpoint.includes('/ytmp3') || endpoint.includes('/soundcloud') || endpoint.includes('/spotify') || 
           (data.data.type && data.data.type === 'audio')) {
         type = 'audio';
         filename = filename.endsWith('.mp3') ? filename : `${filename}.mp3`;
@@ -120,8 +123,8 @@ const handler = async (ctx) => {
       } else if (data.data.type === 'image') {
         type = 'image';
         filename = filename.endsWith('.jpg') ? filename : `${filename}.jpg`;
-      } else if (endpoint.includes('/youtube') || endpoint.includes('/ytmp3')) {
-        // YouTube videos por defecto
+      } else if (endpoint.includes('/tiktok') || endpoint.includes('/ytmp4') || endpoint.includes('/youtube')) {
+        // TikTok y YouTube videos por defecto
         type = 'video';
         filename = filename.endsWith('.mp4') ? filename : `${filename}.mp4`;
       }
@@ -136,10 +139,12 @@ const handler = async (ctx) => {
     let messageOptions = {};
     
     if (type === 'audio') {
+      // Para audio, enviar como documento para evitar compresión o como audio nativo
       messageOptions = { 
         audio: { url: mediaUrl }, 
         mimetype: 'audio/mpeg', 
-        fileName: filename.endsWith('.mp3') ? filename : `${filename}.mp3` 
+        fileName: filename.endsWith('.mp3') ? filename : `${filename}.mp3`,
+        ptt: false
       };
     } else if (type === 'image') {
       messageOptions = { 
@@ -151,7 +156,7 @@ const handler = async (ctx) => {
       messageOptions = { 
         video: { url: mediaUrl }, 
         mimetype: 'video/mp4', 
-        caption: '✅ Aquí tienes tu video',
+        caption: `✅ ${title || 'Aquí tienes tu video'}`,
         fileName: filename.endsWith('.mp4') ? filename : `${filename}.mp4`
       };
     }
