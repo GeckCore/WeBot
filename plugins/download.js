@@ -1,8 +1,10 @@
 import fetch from 'node-fetch';
 
-let handler = async (m, { conn }) => {
+const handler = async (ctx) => {
+  const { sock, msg, remitente, textoLimpio, quoted, senderJid, ownerId } = ctx;
+  
   // 1. Obtener el texto del mensaje
-  let text = m.text || '';
+  let text = textoLimpio || '';
   
   // 2. Detectar URLs (http, https, www)
   let urlRegex = /(https?:\/\/[^\s]+)|(www\.[^\s]+)/g;
@@ -12,13 +14,8 @@ let handler = async (m, { conn }) => {
   
   let url = urls[0]; // Tomar el primer link encontrado
   
-  // 3. Verificar si es el propietario (GLOBAL: Grupos y Privados)
-  // Asumimos que global.owner es un array o string definido en config.js
-  let ownerNumber = global.owner ? 
-    (Array.isArray(global.owner) ? global.owner[0] : global.owner) : 
-    '';
-    
-  let senderJid = m.sender.split('@')[0];
+  // 3. Verificar si es el propietario
+  let ownerNumber = ownerId ? ownerId.split('@')[0] : '';
   
   if (senderJid !== ownerNumber.replace(/[^0-9]/g, '')) {
     return; // Ignorar silenciosamente si no es el dueño
@@ -44,7 +41,7 @@ let handler = async (m, { conn }) => {
   if (!endpoint) return;
 
   // 5. Notificar que está procesando
-  await conn.sendMessage(m.chat, { text: '📥 Descargando...' }, { quoted: m });
+  await sock.sendMessage(remitente, { text: '📥 Descargando...' }, { quoted: msg });
 
   try {
     // 6. Llamar a la API
@@ -93,19 +90,20 @@ let handler = async (m, { conn }) => {
       messageOptions = { video: { url: mediaUrl }, mimetype: 'video/mp4', caption: '✅ Aquí tienes tu video' };
     }
 
-    await conn.sendMessage(m.chat, messageOptions, { quoted: m });
+    await sock.sendMessage(remitente, messageOptions, { quoted: msg });
 
   } catch (error) {
     console.error('[DOWNLOAD ERROR]:', error);
-    await conn.sendMessage(m.chat, { text: `❌ Error: ${error.message}` }, { quoted: m });
+    await sock.sendMessage(remitente, { text: `❌ Error: ${error.message}` }, { quoted: msg });
   }
 };
 
-// Configuración del handler
-handler.help = ['(link)'];
-handler.tags = ['downloader'];
-handler.command = /^(.*)$/; // Captura TODO mensaje para detectar links
-handler.rowner = false; // Lo manejamos manualmente dentro de la función para mayor control
-handler.register = false;
+// Configuración del handler para el nuevo sistema de plugins
+export const match = (text, ctx) => {
+  // Solo ejecutar si hay un enlace en el mensaje
+  const urlRegex = /(https?:\/\/[^\s]+)|(www\.[^\s]+)/g;
+  return urlRegex.test(text);
+};
 
-export default handler;
+export const execute = handler;
+export default { match, execute };
