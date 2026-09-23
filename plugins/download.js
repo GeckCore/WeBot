@@ -45,9 +45,6 @@ const handler = async (ctx) => {
   // Si no es un link soportado por nuestra API, ignorar
   if (!endpoint) return;
 
-  // 5. Notificar que está procesando
-  await sock.sendMessage(remitente, { text: '📥 Descargando...' }, { quoted: msg });
-
   try {
     // 6. Llamar a la API
     const apiKey = 'geckcore';

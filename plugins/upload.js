@@ -89,7 +89,6 @@ export default {
       // ---- Modo 1: .up <url> ----
       const urlArg = sacarUrl(args);
       if (urlArg) {
-        await sock.sendMessage(remitente, { text: '☁️ *UPLOAD:* Re-subiendo ese archivo a la nube...' }, { quoted: msg });
         dataApi = await subirPorUrl(urlArg);
         origen = 'URL externa';
       }
@@ -102,7 +101,6 @@ export default {
             text: `⚠️ Este mensaje no contiene *${args.toLowerCase()}*.\nEnvía el archivo junto con el comando o responde a él con .up`
           }, { quoted: msg });
         }
-        await sock.sendMessage(remitente, { text: '☁️ *UPLOAD:* Descargando y subiendo archivo...' }, { quoted: msg });
         const stream = await downloadContentFromMessage(media.msg, media.type === 'sticker' ? 'image' : media.type);
         let buffer = Buffer.from([]);
         for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
@@ -120,7 +118,6 @@ export default {
           if (rawLen > TAMAÑO_MAX) {
             return sock.sendMessage(remitente, { text: `❌ El archivo pesa demasiado (${Math.round(rawLen / 1024 / 1024)} MB). Máximo: ${TAMAÑO_MAX / 1024 / 1024} MB.` }, { quoted: msg });
           }
-          await sock.sendMessage(remitente, { text: '☁️ *UPLOAD:* Subiendo archivo a la nube...' }, { quoted: msg });
           const stream = await downloadContentFromMessage(media.msg, media.type === 'sticker' ? 'image' : media.type);
           let buffer = Buffer.from([]);
           for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
@@ -150,16 +147,8 @@ export default {
         throw new Error(dataApi.message || 'La API no devolvió ningún enlace.');
       }
 
-      const d = dataApi.data || {};
-      const info = `✅ *ARCHIVO SUBIDO A LA NUBE*\n\n` +
-        `🔗 *Enlace:* ${dataApi.url}\n` +
-        (d.name ? `📄 *Nombre:* ${d.name}\n` : '') +
-        (d.size ? `📦 *Tamaño:* ${d.size}\n` : '') +
-        (d.expires_at ? `⏳ *Expira:* ${new Date(d.expires_at).toLocaleString('es-AR')}\n` : '') +
-        `🛰️ *Servidor:* ${dataApi.server || 'evogb'}\n` +
-        `📡 *Origen:* ${origen}`;
-
-      await sock.sendMessage(remitente, { text: info }, { quoted: msg });
+      // El enlace se devuelve directo, sin texto extra
+      await sock.sendMessage(remitente, { text: dataApi.url }, { quoted: msg });
     } catch (err) {
       console.error('[UPLOAD ERROR]:', err);
       await sock.sendMessage(remitente, { text: `❌ Error: ${err.message}` });
