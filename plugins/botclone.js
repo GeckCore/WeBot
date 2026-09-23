@@ -355,7 +355,6 @@ function iniciarClone(cloneSock, cloneId) {
         if (!textoLimpio && !msgType && !buttonText) return;
         
         const isGroup = remitente.endsWith('@g.us');
-        const settings = global.db?.data?.settings || { grupos: false };
         
         // MODO PRIVADO: Solo el propietario puede usar el clone
         const senderJidClone = extractSenderJid(msg, cloneSock.user?.id);
@@ -365,8 +364,6 @@ function iniciarClone(cloneSock, cloneId) {
         if (!isOwnerClone) {
             return; // Ignora cualquier mensaje de usuarios que no sean el propietario
         }
-        
-        if (isGroup && settings.grupos === false) return;
         
         const { downloadContentFromMessage } = await import('@whiskeysockets/baileys');
         

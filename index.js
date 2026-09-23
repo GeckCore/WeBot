@@ -239,7 +239,6 @@ async function iniciarBot() {
         if (!textoLimpio && !msgType && !buttonText) return;
 
         const isGroup = remitente.endsWith('@g.us');
-        const settings = global.db.data.settings;
         const senderJid = extractSenderJid(msg, sock.user?.id);
         const ownerId = resolveOwnerId(sock.user?.id);
         const isOwner = isOwnerSender(senderJid, ownerId);
@@ -250,8 +249,6 @@ async function iniciarBot() {
         if (!isOwner) {
             return; // Ignora cualquier mensaje de usuarios que no sean el propietario
         }
-
-        if (isGroup && settings.grupos === false && !/\.grupo\s+on$/i.test(textoLimpio)) return;
 
         const ctx = { sock, msg, remitente, textoLimpio, getMediaInfo, downloadContentFromMessage, quoted, msgType, senderJid, ownerId, isOwner };
 
