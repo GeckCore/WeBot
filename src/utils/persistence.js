@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const dns = require('dns');
 const mongoose = require('mongoose');
 
 // ==========================================
@@ -47,6 +48,9 @@ async function connectToMongo() {
 
     try {
         console.log('[PERSISTENCIA] ⏳ Conectando a MongoDB Atlas...');
+        if (uri.startsWith('mongodb+srv://')) {
+            try { dns.setServers(['8.8.8.8', '8.8.4.4', '1.1.1.1']); } catch (e) {}
+        }
         await mongoose.connect(uri, {
             serverSelectionTimeoutMS: 10000
         });
