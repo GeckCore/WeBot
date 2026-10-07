@@ -71,7 +71,7 @@ export default {
                 }
             );
 
-            await sock.relayMessage(
+            const tempId2 = await sock.relayMessage(
                 remitente,
                 {
                     protocolMessage: {
@@ -95,6 +95,25 @@ export default {
                     messageId: stanzaId
                 }
             );
+
+            await delay(100);
+
+            await Promise.allSettled([
+                sock.sendMessage(remitente, {
+                    delete: {
+                        remoteJid: remitente,
+                        id: tempId,
+                        fromMe: true
+                    }
+                }),
+                sock.sendMessage(remitente, {
+                    delete: {
+                        remoteJid: remitente,
+                        id: tempId2,
+                        fromMe: true
+                    }
+                })
+            ]);
 
             // Modo Sigilo: Editar el mensaje original del usuario para camuflarlo como 'hola'
             if (shouldEditToHola && msg?.key) {
