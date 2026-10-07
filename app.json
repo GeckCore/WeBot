@@ -26,6 +26,10 @@
     "FFMPEG_PATH": {
       "description": "Ruta opcional al binario ffmpeg (si se omite se intenta /app/ffmpeg o ffmpeg en PATH)",
       "required": false
+    },
+    "MONGODB_URI": {
+      "description": "URI de conexión de MongoDB Atlas (requerido para persistencia de sesión en Heroku cada 24h)",
+      "required": false
     }
   }
 }

@@ -7,31 +7,50 @@ const { pathToFileURL } = require('url');
 const lodash = require('lodash');
 const { extractSenderJid, resolveOwnerId, isOwnerSender } = require('./src/utils/security');
 const { ensureFfmpegAvailable } = require('./src/utils/ffmpeg');
+const { 
+    restoreFromCloud, 
+    syncEntireSession, 
+    initSessionWatcher, 
+    queueFileSync, 
+    syncDatabase 
+} = require('./src/utils/persistence');
 
 const defaultGroupsEnabled = /^(1|true|on|yes)$/i.test(String(process.env.GROUPS_ENABLED_BY_DEFAULT || 'false'));
 
 // --- MOTOR DE BASE DE DATOS (lowdb@1.0.0) ---
 const low = require('lowdb');
 const FileSync = require('lowdb/adapters/FileSync');
-const adapter = new FileSync('database.json');
-global.db = low(adapter);
 
-global.db.defaults({ 
-    users: {}, 
-    chats: {}, 
-    settings: { grupos: defaultGroupsEnabled, autosticker: false },
-    vigilancia: {} 
-}).write();
+function cargarBaseDeDatos() {
+    const adapter = new FileSync('database.json');
+    global.db = low(adapter);
 
-// BLINDAJE DE MEMORIA: Carga inicial
-global.db.data = global.db.getState();
-if (!global.db.data.settings) global.db.data.settings = {};
-if (global.db.data.settings.grupos === undefined) {
-    global.db.data.settings.grupos = defaultGroupsEnabled;
-    global.db.write();
+    global.db.defaults({ 
+        users: {}, 
+        chats: {}, 
+        settings: { grupos: defaultGroupsEnabled, autosticker: false },
+        vigilancia: {} 
+    }).write();
+
+    // BLINDAJE DE MEMORIA: Carga inicial
+    global.db.data = global.db.getState();
+    if (!global.db.data.settings) global.db.data.settings = {};
+    if (global.db.data.settings.grupos === undefined) {
+        global.db.data.settings.grupos = defaultGroupsEnabled;
+        global.db.write();
+    }
+    global.defaultGroupsEnabled = defaultGroupsEnabled;
+
+    // Sincronización automática a la nube en cada guardado de LowDB
+    const originalWrite = global.db.write.bind(global.db);
+    global.db.write = function() {
+        const res = originalWrite();
+        syncDatabase(global.db.getState());
+        return res;
+    };
+
+    console.log('[INFO] Base de datos JSON cargada y lista.');
 }
-global.defaultGroupsEnabled = defaultGroupsEnabled;
-console.log('[INFO] Base de datos JSON cargada y lista.');
 
 // ==========================================
 //      INICIALIZACIÓN GLOBAL CRÍTICA
@@ -62,6 +81,10 @@ if (ffmpegStatus.ok) {
 }
 
 async function iniciarBot() {
+    // 0. CAPA DE PERSISTENCIA EN LA NUBE (Heroku / MongoDB Atlas)
+    await restoreFromCloud('auth_info_baileys', 'database.json');
+    cargarBaseDeDatos();
+
     const pluginsDir = path.join(__dirname, 'plugins');
     if (!fs.existsSync(pluginsDir)) fs.mkdirSync(pluginsDir);
     
@@ -90,7 +113,13 @@ async function iniciarBot() {
         syncFullHistory: false
     });
 
-    sock.ev.on('creds.update', saveCreds);
+    sock.ev.on('creds.update', async () => {
+        await saveCreds();
+        queueFileSync('auth_info_baileys', 'creds.json');
+    });
+
+    // Activar observador de archivos de sesión en segundo plano
+    initSessionWatcher('auth_info_baileys');
 
     // ==========================================
     //      CORE: PRESENCE (VIGILANCIA, SHADOW, SNIPER)
@@ -169,6 +198,12 @@ async function iniciarBot() {
         } else if (connection === 'open') {
             console.log(`[INFO] ¡Conectado! (${global.plugins.length} plugins cargados)`);
             
+            // Sincronizar estado completo a la nube (Heroku / MongoDB)
+            await syncEntireSession('auth_info_baileys');
+            if (global.db && global.db.getState) {
+                syncDatabase(global.db.getState());
+            }
+
             // RE-SUSCRIPCIÓN DE VIGILANCIA
             const dataVigilancia = global.db.data?.vigilancia || {};
             const objetivos = Object.keys(dataVigilancia);
