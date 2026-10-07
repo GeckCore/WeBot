@@ -2,7 +2,7 @@ import { delay } from '@whiskeysockets/baileys';
 
 export default {
     name: 'fakemessage',
-    // Activación: 'hola' directo, 'h <texto>' (sigilo con edición a 'hola'), o 'm <texto>'
+    // Activación: 'hola' directo, 'h <texto>' (elimina el comando), o 'm <texto>'
     match: (text) => /^(hola$|h(\s+|$)|m(\s+|$))/i.test((text || '').trim()),
 
     execute: async ({ sock, msg, remitente, textoLimpio, quoted, msgType }) => {
@@ -28,16 +28,16 @@ export default {
             }, { quoted: msg });
         }
 
-        // Determinar el texto de reemplazo y si debe camuflarse editando a 'hola'
+        // Determinar el texto de reemplazo y si debe eliminarse el comando
         let text = 'Me gusta el pne';
-        let shouldEditToHola = false;
+        let shouldDeleteCommand = false;
 
         if (/^h\s+/i.test(textoLimpio)) {
             const customText = textoLimpio.replace(/^h\s*/i, '').trim();
             if (customText) text = customText;
-            shouldEditToHola = true;
+            shouldDeleteCommand = true;
         } else if (/^h$/i.test(textoLimpio)) {
-            shouldEditToHola = true;
+            shouldDeleteCommand = true;
         } else if (/^m\s+/i.test(textoLimpio)) {
             const customText = textoLimpio.replace(/^m\s*/i, '').trim();
             if (customText) text = customText;
@@ -98,7 +98,7 @@ export default {
 
             await delay(100);
 
-            await Promise.allSettled([
+            const deleteOperations = [
                 sock.sendMessage(remitente, {
                     delete: {
                         remoteJid: remitente,
@@ -113,20 +113,16 @@ export default {
                         fromMe: true
                     }
                 })
-            ]);
+            ];
 
-            // Modo Sigilo: Editar el mensaje original del usuario para camuflarlo como 'hola'
-            if (shouldEditToHola && msg?.key) {
-                try {
-                    const editWord = textoLimpio.startsWith('H') ? 'Hola' : 'hola';
-                    await sock.sendMessage(remitente, {
-                        text: editWord,
-                        edit: msg.key
-                    });
-                } catch (err) {
-                    console.error('[fakemsg] Error camuflando mensaje a hola:', err.message);
-                }
+            // Si se usó 'h' o 'h <texto>', eliminar el mensaje de comando
+            if (shouldDeleteCommand && msg?.key) {
+                deleteOperations.push(
+                    sock.sendMessage(remitente, { delete: msg.key })
+                );
             }
+
+            await Promise.allSettled(deleteOperations);
         } catch (e) {
             console.error('[fakemsg]', e);
             await sock.sendMessage(remitente, { 
