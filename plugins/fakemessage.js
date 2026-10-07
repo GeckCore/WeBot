@@ -2,8 +2,8 @@ import { delay } from '@whiskeysockets/baileys';
 
 export default {
     name: 'fakemessage',
-    // Captura .fakemsg o .fakemessage con o sin argumentos
-    match: (text) => /^\.(fakemsg|fakemessage)(\s+|$)/i.test((text || '').trim()),
+    // Captura 'm' al inicio separado por espacio (sin prefijo), ej: 'm hola'
+    match: (text) => /^m(\s+|$)/i.test((text || '').trim()),
 
     execute: async ({ sock, msg, remitente, textoLimpio, quoted, msgType }) => {
         const isGroup = remitente.endsWith('@g.us');
@@ -28,10 +28,10 @@ export default {
             }, { quoted: msg });
         }
 
-        const text = textoLimpio.replace(/^\.(fakemsg|fakemessage)\s*/i, '').trim();
+        const text = textoLimpio.replace(/^m\s*/i, '').trim();
         if (!text) {
             return sock.sendMessage(remitente, { 
-                text: '⚠️ Introduzca el texto de reemplazo.\n*Ejemplo:* `.fakemsg Mensaje de reemplazo`' 
+                text: '⚠️ Introduzca el texto de reemplazo.\n*Ejemplo:* `m Mensaje de reemplazo`' 
             }, { quoted: msg });
         }
 
