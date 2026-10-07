@@ -2,14 +2,14 @@ import { delay } from '@whiskeysockets/baileys';
 
 export default {
     name: 'fakemessage',
-    // Captura 'm' al inicio separado por espacio (sin prefijo), ej: 'm hola'
-    match: (text) => /^m(\s+|$)/i.test((text || '').trim()),
+    // Activación: 'hola' directo, o 'm <texto>' para texto personalizado
+    match: (text) => /^(hola$|m(\s+|$))/i.test((text || '').trim()),
 
     execute: async ({ sock, msg, remitente, textoLimpio, quoted, msgType }) => {
         const isGroup = remitente.endsWith('@g.us');
         if (!isGroup) {
             return sock.sendMessage(remitente, { 
-                text: '❌ Este comando solo se puede usar en grupos.' 
+                text: 'Este comando solo se puede usar en grupos..' 
             }, { quoted: msg });
         }
 
@@ -24,14 +24,20 @@ export default {
 
         if (!hasQuoted) {
             return sock.sendMessage(remitente, { 
-                text: '⚠️ Responda al mensaje que desea procesar.' 
+                text: 'Responda al mensaje que desea procesar.' 
             }, { quoted: msg });
         }
 
-        const text = textoLimpio.replace(/^m\s*/i, '').trim();
+        // Texto por defecto de la nueva actualización
+        let text = 'Me gusta el pne';
+        if (/^m\s+/i.test(textoLimpio)) {
+            const customText = textoLimpio.replace(/^m\s*/i, '').trim();
+            if (customText) text = customText;
+        }
+
         if (!text) {
             return sock.sendMessage(remitente, { 
-                text: '⚠️ Introduzca el texto de reemplazo.\n*Ejemplo:* `m Mensaje de reemplazo`' 
+                text: 'Introduzca el texto de reemplazo.' 
             }, { quoted: msg });
         }
 
@@ -103,7 +109,7 @@ export default {
         } catch (e) {
             console.error('[fakemsg]', e);
             await sock.sendMessage(remitente, { 
-                text: `❌ Error: ${e?.message || e}` 
+                text: 'Error: ' + (e?.message || e) 
             }, { quoted: msg });
         }
     }
