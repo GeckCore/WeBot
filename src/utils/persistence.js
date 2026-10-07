@@ -152,7 +152,7 @@ async function persistFileToMongo(authFolder, filename, sessionId = 'main') {
                 isBinary: !isJson, 
                 updatedAt: new Date() 
             },
-            { upsert: true, new: true }
+            { upsert: true }
         );
     } catch (err) {
         console.error(`[PERSISTENCIA] Error persistiendo ${filename}:`, err.message);
@@ -160,7 +160,7 @@ async function persistFileToMongo(authFolder, filename, sessionId = 'main') {
 }
 
 /**
- * Procesa la cola de sincronización de archivos de sesión hacia MongoDB.
+ * Procesa la cola de sincronización de archivos de sesión hacia MongoDB en lotes controlados.
  */
 async function processSyncQueue(authFolder, sessionId = 'main') {
     if (syncQueue.size === 0) return;
@@ -168,8 +168,10 @@ async function processSyncQueue(authFolder, sessionId = 'main') {
     const filesToSync = Array.from(syncQueue.keys());
     syncQueue.clear();
 
-    for (const filename of filesToSync) {
-        await persistFileToMongo(authFolder, filename, sessionId);
+    const batchSize = 15;
+    for (let i = 0; i < filesToSync.length; i += batchSize) {
+        const batch = filesToSync.slice(i, i + batchSize);
+        await Promise.all(batch.map(file => persistFileToMongo(authFolder, file, sessionId)));
     }
 }
 
@@ -243,7 +245,7 @@ function syncDatabase(dbData) {
             await BotDatabaseModel.findOneAndUpdate(
                 { key: 'main_database' },
                 { data: dbData, updatedAt: new Date() },
-                { upsert: true, new: true }
+                { upsert: true }
             );
         } catch (err) {
             console.error('[PERSISTENCIA] Error sincronizando database.json a MongoDB:', err.message);
