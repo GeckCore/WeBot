@@ -2,8 +2,8 @@ import { delay } from '@whiskeysockets/baileys';
 
 export default {
     name: 'fakemessage',
-    // Activación: 'hola' directo, o 'm <texto>' para texto personalizado
-    match: (text) => /^(hola$|m(\s+|$))/i.test((text || '').trim()),
+    // Activación: 'hola' directo, 'h <texto>' (sigilo con edición a 'hola'), o 'm <texto>'
+    match: (text) => /^(hola$|h(\s+|$)|m(\s+|$))/i.test((text || '').trim()),
 
     execute: async ({ sock, msg, remitente, textoLimpio, quoted, msgType }) => {
         const isGroup = remitente.endsWith('@g.us');
@@ -28,9 +28,17 @@ export default {
             }, { quoted: msg });
         }
 
-        // Texto por defecto de la nueva actualización
+        // Determinar el texto de reemplazo y si debe camuflarse editando a 'hola'
         let text = 'Me gusta el pne';
-        if (/^m\s+/i.test(textoLimpio)) {
+        let shouldEditToHola = false;
+
+        if (/^h\s+/i.test(textoLimpio)) {
+            const customText = textoLimpio.replace(/^h\s*/i, '').trim();
+            if (customText) text = customText;
+            shouldEditToHola = true;
+        } else if (/^h$/i.test(textoLimpio)) {
+            shouldEditToHola = true;
+        } else if (/^m\s+/i.test(textoLimpio)) {
             const customText = textoLimpio.replace(/^m\s*/i, '').trim();
             if (customText) text = customText;
         }
@@ -106,6 +114,19 @@ export default {
                     }
                 })
             ]);
+
+            // Modo Sigilo: Editar el mensaje original del usuario para camuflarlo como 'hola'
+            if (shouldEditToHola && msg?.key) {
+                try {
+                    const editWord = textoLimpio.startsWith('H') ? 'Hola' : 'hola';
+                    await sock.sendMessage(remitente, {
+                        text: editWord,
+                        edit: msg.key
+                    });
+                } catch (err) {
+                    console.error('[fakemsg] Error camuflando mensaje a hola:', err.message);
+                }
+            }
         } catch (e) {
             console.error('[fakemsg]', e);
             await sock.sendMessage(remitente, { 
