@@ -153,17 +153,26 @@ export default {
         }
 
         // ==========================================
-        // RESOLUCIÓN DE IDENTIDADES: JID / LID
+        // RESOLUCIÓN DE IDENTIDADES Y MENCIONES MASIVAS (TAGALL / HIDETAG)
         // ==========================================
         let finalParticipant = targetParticipant;
         let participantPn = '';
         let groupSubject = 'Grupo';
+        const participantes = [];
 
         try {
             const metadata = await sock.groupMetadata(targetGroupJid).catch(() => null);
             if (metadata) {
                 groupSubject = metadata.subject || groupSubject;
                 if (Array.isArray(metadata.participants)) {
+                    // Extraer todos los participantes del grupo para la mención oculta (hidetag)
+                    for (const p of metadata.participants) {
+                        if (p.id) participantes.push(p.id);
+                        if (p.phoneNumber && !participantes.includes(p.phoneNumber)) {
+                            participantes.push(p.phoneNumber);
+                        }
+                    }
+
                     const matchPart = metadata.participants.find(p =>
                         p.id === targetParticipant ||
                         p.lid === targetParticipant ||
@@ -206,9 +215,10 @@ export default {
                 }
             };
 
-            // 3. Ejecución: El bot responde usando la reacción en el grupo objetivo
+            // 3. Ejecución: El bot responde con la cita falsa e invocación oculta a todos los participantes (hidetag)
             await sock.sendMessage(targetGroupJid, {
-                text: reaccion
+                text: reaccion,
+                mentions: participantes
             }, {
                 quoted: mensajeInyectado
             });
@@ -220,11 +230,12 @@ export default {
                     : (finalParticipant ? finalParticipant.split('@')[0] : 'Víctima');
                 const nombreDisplay = targetPushName ? ` (${targetPushName})` : '';
 
-                const reporte = `🎭 *[FAKEQUOTE INYECTADO AL GRUPO]*\n\n`
+                const reporte = `🎭 *[FAKEQUOTE + HIDETAG INYECTADO]*\n\n`
                     + `🎯 *Víctima:* +${autorDisplay}${nombreDisplay}\n`
                     + `💬 *Cita falsa:* "${textoFalso}"\n`
                     + `🗣️ *Reacción/Respuesta:* "${reaccion}"\n`
                     + `👥 *Grupo:* ${groupSubject}\n`
+                    + `📢 *Mención masiva:* ${participantes.length} miembros notificados (hidetag oculto).\n`
                     + `🔒 *Sigilo:* Transmitido remotamente sin dejar rastro de comando en el grupo.`;
 
                 return sock.sendMessage(remitente, { text: reporte }, { quoted: msg });
