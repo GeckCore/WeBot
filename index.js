@@ -60,6 +60,8 @@ global.sniperTargets = {};
 global.lastMsgTimestamps = {}; 
 global.sesionesVigilia = {}; 
 global.chatHistory = new Map(); // Memoria RAM para Gemini
+global.recentGroupMessages = new Map(); // Buffer en RAM para control remoto de mensajes (Titiritero)
+global.lastViewedGroup = null;
 global.plugins = [];
 
 const isWindows = process.platform === 'win32';
@@ -232,6 +234,30 @@ async function iniciarBot() {
 
         global.db.data = global.db.getState();
         const remitente = msg.key.remoteJid;
+        
+        // --- REGISTRO EN MEMORIA PARA EL MODO TITIRITERO REMOTO ---
+        if (remitente.endsWith('@g.us') && msg.key?.id) {
+            if (!global.recentGroupMessages.has(remitente)) {
+                global.recentGroupMessages.set(remitente, []);
+            }
+            const buffer = global.recentGroupMessages.get(remitente);
+            const msgBody = msg.message?.conversation 
+                || msg.message?.extendedTextMessage?.text 
+                || msg.message?.imageMessage?.caption 
+                || msg.message?.videoMessage?.caption 
+                || '';
+            
+            if (msgBody) {
+                const senderPart = msg.key.participant || remitente;
+                buffer.unshift({
+                    id: msg.key.id,
+                    participant: senderPart,
+                    text: msgBody.slice(0, 120),
+                    timestamp: Date.now()
+                });
+                if (buffer.length > 35) buffer.pop();
+            }
+        }
         
         let texto = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
         let buttonText = "";
