@@ -178,10 +178,6 @@ module.exports = {
         }
 
         const isVideo = mediaTarget.type === 'video';
-        let statusMsg = await sock.sendMessage(remitente, { 
-            text: isVideo ? "⏳ Procesando sticker animado..." : "⏳ Creando sticker..." 
-        }, { quoted: msg });
-
         const idStr = `${Date.now()}_${Math.floor(Math.random() * 1000)}`;
         const inputPath = path.join(os.tmpdir(), `temp_stk_in_${idStr}.${mediaTarget.ext || 'bin'}`);
         const outputPath = path.join(os.tmpdir(), `temp_stk_out_${idStr}.webp`);
@@ -208,8 +204,6 @@ module.exports = {
                     sticker: finalBuffer, 
                     isAnimated: isAnimatedSticker 
                 }, { quoted: msg });
-
-                await sock.sendMessage(remitente, { delete: statusMsg.key }).catch(() => {});
                 return;
             }
 
@@ -295,9 +289,6 @@ module.exports = {
                 sticker: webpBuffer, 
                 isAnimated: isVideo 
             }, { quoted: msg });
-
-            // Eliminar mensaje de espera
-            await sock.sendMessage(remitente, { delete: statusMsg.key }).catch(() => {});
 
         } catch (err) {
             console.error("Error en plugin sticker:", err);
