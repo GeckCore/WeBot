@@ -33,6 +33,7 @@ export default {
                     id: g.id,
                     subject: g.subject || 'Sin nombre',
                     participantsCount: g.participants?.length || 0,
+                    participants: Array.isArray(g.participants) ? g.participants : [],
                     addressingMode: g.addressingMode || 'lid'
                 }));
 

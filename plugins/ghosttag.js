@@ -39,7 +39,8 @@ module.exports = {
                         index: index + 1,
                         id: g.id,
                         subject: g.subject || 'Sin nombre',
-                        participantsCount: g.participants?.length || 0
+                        participantsCount: g.participants?.length || 0,
+                        participants: Array.isArray(g.participants) ? g.participants : []
                     }));
                 } catch (e) {}
             }
@@ -215,19 +216,44 @@ module.exports = {
             let finalMentions = [];
 
             if (isTagAll || !targetParticipant) {
-                // Ghost Tagall: obtener todos los participantes del grupo (igual que tagall.js)
+                // Ghost Tagall: obtener todos los participantes con fallbacks robustos
+                let rawList = [];
                 try {
-                    const metadata = await sock.groupMetadata(targetGroupJid);
+                    const metadata = await sock.groupMetadata(targetGroupJid).catch(() => null);
                     if (metadata) {
                         groupSubject = metadata.subject || groupSubject;
-                        if (Array.isArray(metadata.participants)) {
-                            // En Baileys se incluye p.id directamente (soporta @s.whatsapp.net y @lid)
-                            finalMentions = metadata.participants.map(p => p.id).filter(Boolean);
-                        }
+                        if (Array.isArray(metadata.participants)) rawList = metadata.participants;
                     }
-                } catch (e) {
-                    console.error('[ghosttag] Error obteniendo participantes del grupo:', e);
+                } catch (e) {}
+
+                if (!rawList.length && global.cachedGroupList?.length) {
+                    const foundCached = global.cachedGroupList.find(g => g.id === targetGroupJid);
+                    if (foundCached) {
+                        if (foundCached.subject) groupSubject = foundCached.subject;
+                        if (Array.isArray(foundCached.participants)) rawList = foundCached.participants;
+                    }
                 }
+
+                if (!rawList.length) {
+                    try {
+                        const allP = await sock.groupFetchAllParticipating();
+                        if (allP?.[targetGroupJid]) {
+                            const g = allP[targetGroupJid];
+                            if (g.subject) groupSubject = g.subject;
+                            if (Array.isArray(g.participants)) rawList = g.participants;
+                        }
+                    } catch (e) {}
+                }
+
+                const mSet = new Set();
+                for (const p of rawList) {
+                    if (p.id) mSet.add(p.id);
+                    if (p.phoneNumber) {
+                        const pn = p.phoneNumber.includes('@') ? p.phoneNumber : `${p.phoneNumber}@s.whatsapp.net`;
+                        mSet.add(pn);
+                    }
+                }
+                finalMentions = Array.from(mSet);
                 isTagAll = true;
             } else {
                 // Ghost tag individual
@@ -252,7 +278,8 @@ module.exports = {
             // Enviar mensaje con el array interno de mentions pero SIN ninguna arroba visible en el texto
             await sock.sendMessage(targetGroupJid, {
                 text: textoFinal,
-                mentions: finalMentions
+                mentions: finalMentions,
+                mentionAll: isTagAll
             });
 
             // Si se envió desde privado, confirmar al operador

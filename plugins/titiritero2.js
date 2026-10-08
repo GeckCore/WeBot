@@ -17,7 +17,7 @@ module.exports = {
         let targetParticipant = '';
         let targetText = '';
         let nuevoTexto = '';
-        let pingTexto = '👀';
+        let pingTexto = '📢 ¡Atención a todos!'; // Aviso visible por defecto
         let isDirectInGroup = false;
         let targetPushName = '';
 
@@ -52,7 +52,7 @@ module.exports = {
                     + "1. Elige el grupo con `.grupos` y luego `.mensajes <número>`.\n"
                     + "2. `.titiritero2 <#PIN o número> | <nuevo texto> | [aviso TagAll]`\n"
                     + "• O explícito: `.titiritero2 <num_grupo> | <#PIN o número> | <nuevo texto> | [aviso]`\n\n"
-                    + "📢 *Efecto:* Modifica el mensaje de la víctima y responde en el acto con un **TagAll real** citando el mensaje alterado.";
+                    + "📢 *Efecto:* Modifica el mensaje de la víctima y envía un aviso visible con **TagAll real** citando el mensaje alterado.";
                 return sock.sendMessage(remitente, { text: ayuda }, { quoted: msg });
             }
 
@@ -179,37 +179,76 @@ module.exports = {
         }
 
         // ==========================================
-        // OBTENCIÓN DE PARTICIPANTES PARA TAGALL
+        // OBTENCIÓN ROBUSTA DE PARTICIPANTES PARA TAGALL
         // ==========================================
         let allParticipants = [];
         let finalParticipant = targetParticipant;
         let participantPn = '';
 
-        try {
-            const metadata = await sock.groupMetadata(targetGroupJid).catch(() => null);
-            if (metadata) {
-                groupName = metadata.subject || groupName;
-                if (Array.isArray(metadata.participants)) {
-                    allParticipants = metadata.participants.map(p => p.id).filter(Boolean);
+        let rawParticipantsList = [];
+        let groupMetaObj = null;
 
-                    const matchPart = metadata.participants.find(p => 
-                        p.id === targetParticipant || 
-                        p.lid === targetParticipant || 
-                        p.phoneNumber === targetParticipant
-                    );
-                    if (matchPart) {
-                        participantPn = matchPart.phoneNumber || (matchPart.id?.endsWith('@s.whatsapp.net') ? matchPart.id : '');
-                        const participantLid = matchPart.lid || (matchPart.id?.endsWith('@lid') ? matchPart.id : '');
-                        if (metadata.addressingMode === 'lid' && participantLid) {
-                            finalParticipant = participantLid;
-                        } else if (participantPn) {
-                            finalParticipant = participantPn;
-                        }
+        // Intentar 1: metadata fresca de WhatsApp
+        try {
+            groupMetaObj = await sock.groupMetadata(targetGroupJid).catch(() => null);
+            if (groupMetaObj) {
+                if (groupMetaObj.subject) groupName = groupMetaObj.subject;
+                if (Array.isArray(groupMetaObj.participants) && groupMetaObj.participants.length > 0) {
+                    rawParticipantsList = groupMetaObj.participants;
+                }
+            }
+        } catch (e) {}
+
+        // Fallback 2: Buscar en lista en caché de .grupos
+        if ((!rawParticipantsList || !rawParticipantsList.length) && global.cachedGroupList?.length) {
+            const foundCached = global.cachedGroupList.find(g => g.id === targetGroupJid);
+            if (foundCached) {
+                if (foundCached.subject) groupName = foundCached.subject;
+                if (Array.isArray(foundCached.participants) && foundCached.participants.length > 0) {
+                    rawParticipantsList = foundCached.participants;
+                }
+            }
+        }
+
+        // Fallback 3: Consultar sock.groupFetchAllParticipating()
+        if (!rawParticipantsList || !rawParticipantsList.length) {
+            try {
+                const participating = await sock.groupFetchAllParticipating();
+                if (participating?.[targetGroupJid]) {
+                    const g = participating[targetGroupJid];
+                    if (g.subject) groupName = g.subject;
+                    if (Array.isArray(g.participants) && g.participants.length > 0) {
+                        rawParticipantsList = g.participants;
+                    }
+                }
+            } catch (e) {}
+        }
+
+        if (Array.isArray(rawParticipantsList) && rawParticipantsList.length > 0) {
+            const mentionsSet = new Set();
+            for (const p of rawParticipantsList) {
+                if (p.id) mentionsSet.add(p.id);
+                if (p.phoneNumber) {
+                    const pnJid = p.phoneNumber.includes('@') ? p.phoneNumber : `${p.phoneNumber}@s.whatsapp.net`;
+                    mentionsSet.add(pnJid);
+                }
+
+                // Resolver datos del participante objetivo (víctima)
+                if (
+                    p.id === targetParticipant || 
+                    p.lid === targetParticipant || 
+                    p.phoneNumber === targetParticipant
+                ) {
+                    participantPn = p.phoneNumber || (p.id?.endsWith('@s.whatsapp.net') ? p.id : '');
+                    const participantLid = p.lid || (p.id?.endsWith('@lid') ? p.id : '');
+                    if (groupMetaObj?.addressingMode === 'lid' && participantLid) {
+                        finalParticipant = participantLid;
+                    } else if (participantPn) {
+                        finalParticipant = participantPn;
                     }
                 }
             }
-        } catch (e) {
-            console.error('[titiritero2] Error obteniendo metadata:', e);
+            allParticipants = Array.from(mentionsSet);
         }
 
         try {
@@ -292,7 +331,7 @@ module.exports = {
                 })
             ]);
 
-            // 5. Inyección de la notificación TagAll real citando directamente el mensaje editado de la víctima
+            // 5. Inyección del mensaje visible con TagAll citando directamente el mensaje editado de la víctima
             const citaEditada = {
                 key: {
                     remoteJid: targetGroupJid,
@@ -307,7 +346,8 @@ module.exports = {
 
             await sock.sendMessage(targetGroupJid, {
                 text: pingTexto,
-                mentions: allParticipants
+                mentions: allParticipants,
+                mentionAll: true
             }, {
                 quoted: citaEditada
             });
@@ -331,7 +371,7 @@ module.exports = {
                 + `📢 *TagAll emitido:* ${allParticipants.length} miembros notificados\n`
                 + `🆔 *Stanza ID:* \`${targetStanzaId}\`\n`
                 + `💬 *Nuevo texto:* "${nuevoTexto}"\n`
-                + `↩️ *Aviso/Cita enviada:* "${pingTexto}"`;
+                + `↩️ *Aviso con mención:* "${pingTexto}"`;
 
             return sock.sendMessage(remitente, { text: reporte }, { quoted: isDirectInGroup ? undefined : msg });
 
