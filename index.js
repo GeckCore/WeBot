@@ -93,17 +93,17 @@ async function iniciarBot() {
     
     const pluginFiles = fs.readdirSync(pluginsDir).filter(file => file.endsWith('.js')).sort();
     
-    global.plugins = await Promise.all(pluginFiles.map(async (file) => {
+    global.plugins = [];
+    for (const file of pluginFiles) {
         try {
             const fullPath = path.join(pluginsDir, file);
             const module = await import(pathToFileURL(fullPath).href);
-            return module.default || module;
+            const plugin = module.default || module;
+            if (plugin) global.plugins.push(plugin);
         } catch (err) {
             console.error(`❌ Error cargando plugin ${file}:`, err.message);
-            return null;
         }
-    }));
-    global.plugins = global.plugins.filter(p => p !== null);
+    }
 
     const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
     const { version } = await fetchLatestBaileysVersion();

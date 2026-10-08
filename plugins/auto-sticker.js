@@ -81,9 +81,15 @@ export default {
     name: 'auto_stickers',
     
     match: (text) => {
-        if (/^\.(autosticker|as)\s+(on|off)$/i.test(text)) return true;
+        if (/^\.(autosticker|as)\s+(on|off)$/i.test((text || '').trim())) return true;
         
-        const lower = text.toLowerCase();
+        // Si el texto es un comando (empieza por '.'), nunca debe interceptarlo
+        if ((text || '').trim().startsWith('.')) return false;
+
+        // Si la función está desactivada en la base de datos, no interceptar
+        if (!global.db?.data?.settings?.autosticker) return false;
+
+        const lower = (text || '').toLowerCase();
         return triggers.some(word => {
             const regex = new RegExp(`(^|\\s|[.,?!])${escapeRegex(word)}([.,?!\\s]|$)`, 'i');
             return regex.test(lower);

@@ -1,5 +1,5 @@
 // plugins/titiritero2.js
-const { delay } = require('@whiskeysockets/baileys');
+const delay = (ms) => new Promise(res => setTimeout(res, ms));
 
 module.exports = {
     name: 'titiritero2',

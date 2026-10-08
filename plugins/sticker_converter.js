@@ -1,7 +1,6 @@
 const { exec } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
 const util = require('util');
 const execPromise = util.promisify(exec);
 const { ensureFfmpegAvailable } = require('../src/utils/ffmpeg');
@@ -14,7 +13,7 @@ module.exports = {
         ctx.quoted?.stickerMessage && 
         !ctx.quoted.stickerMessage.isAnimated,
     
-    execute: async ({ sock, remitente, msg, quoted }) => {
+    execute: async ({ sock, remitente, msg, quoted, downloadContentFromMessage }) => {
         const statusMsg = await sock.sendMessage(remitente, { text: "⏳ Convirtiendo sticker a imagen..." }, { quoted: msg });
 
         const tempWebp = path.join(__dirname, `../temp_${Date.now()}.webp`);
