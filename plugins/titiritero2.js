@@ -17,6 +17,7 @@ module.exports = {
         let targetParticipant = '';
         let targetText = '';
         let nuevoTexto = '';
+        let pingTexto = '👀';
         let isDirectInGroup = false;
         let targetPushName = '';
 
@@ -32,8 +33,11 @@ module.exports = {
             targetGroupJid = remitente;
             targetStanzaId = contextInfo.stanzaId;
             targetParticipant = contextInfo.participant || '';
-            nuevoTexto = rawArgs.trim();
             isDirectInGroup = true;
+
+            const partsDirect = rawArgs.split('|').map(p => p.trim());
+            nuevoTexto = partsDirect[0] || '';
+            if (partsDirect[1]) pingTexto = partsDirect.slice(1).join('|').trim();
         }
 
         // ==========================================
@@ -42,21 +46,36 @@ module.exports = {
         if (!targetStanzaId) {
             if (!rawArgs) {
                 const ayuda = "❌ *Formato incorrecto.*\n\n"
-                    + "📌 *Uso directo en grupo:*\n"
-                    + "• Cita el mensaje y escribe: `.titiritero2 <nuevo texto>`\n"
-                    + "• O con PIN: `.titiritero2 <#PIN o número> | <nuevo texto>`\n\n"
+                    + "📌 *Uso directo en grupo (citando mensaje):*\n"
+                    + "• `.titiritero2 <nuevo texto> | [aviso TagAll]`\n\n"
                     + "🌐 *Uso remoto desde privado:*\n"
                     + "1. Elige el grupo con `.grupos` y luego `.mensajes <número>`.\n"
-                    + "2. `.titiritero2 <#PIN o número> | <nuevo texto>`\n"
-                    + "• O explícito: `.titiritero2 <num_grupo> | <#PIN o número> | <nuevo texto>`\n\n"
-                    + "📢 *Efecto especial:* El mensaje modificado incluye **TagAll invisible/nativo** a todos los integrantes del grupo.";
+                    + "2. `.titiritero2 <#PIN o número> | <nuevo texto> | [aviso TagAll]`\n"
+                    + "• O explícito: `.titiritero2 <num_grupo> | <#PIN o número> | <nuevo texto> | [aviso]`\n\n"
+                    + "📢 *Efecto:* Modifica el mensaje de la víctima y responde en el acto con un **TagAll real** citando el mensaje alterado.";
                 return sock.sendMessage(remitente, { text: ayuda }, { quoted: msg });
             }
 
             const parts = rawArgs.split('|').map(p => p.trim());
 
-            // Subcaso B1: 3 partes (.titiritero2 <num_grupo> | <#PIN o num> | <nuevo_texto>)
-            if (parts.length >= 3 && !isNaN(parseInt(parts[0], 10))) {
+            // Subcaso B1: 4 partes (.titiritero2 <num_grupo> | <#PIN o num> | <nuevo_texto> | <aviso>)
+            if (parts.length >= 4 && !isNaN(parseInt(parts[0], 10))) {
+                const groupIdx = parseInt(parts[0], 10);
+                if (global.cachedGroupList?.length) {
+                    const found = global.cachedGroupList.find(g => g.index === groupIdx);
+                    if (found) {
+                        targetGroupJid = found.id;
+                        groupName = found.subject;
+                        global.lastViewedGroup = targetGroupJid;
+                    }
+                }
+                const targetSelector = parts[1];
+                nuevoTexto = parts[2];
+                if (parts[3]) pingTexto = parts.slice(3).join('|').trim();
+                resolverObjetivo(targetSelector, targetGroupJid);
+            }
+            // Subcaso B2: 3 partes con grupo explícito (.titiritero2 <num_grupo> | <#PIN o num> | <nuevo_texto>)
+            else if (parts.length >= 3 && !isNaN(parseInt(parts[0], 10))) {
                 const groupIdx = parseInt(parts[0], 10);
                 if (global.cachedGroupList?.length) {
                     const found = global.cachedGroupList.find(g => g.index === groupIdx);
@@ -70,7 +89,18 @@ module.exports = {
                 nuevoTexto = parts.slice(2).join('|').trim();
                 resolverObjetivo(targetSelector, targetGroupJid);
             }
-            // Subcaso B2: 2 partes (.titiritero2 <#PIN o num> | <nuevo_texto>)
+            // Subcaso B3: 3 partes con grupo ya seleccionado (.titiritero2 <#PIN o num> | <nuevo_texto> | <aviso>)
+            else if (parts.length >= 3) {
+                const targetSelector = parts[0];
+                nuevoTexto = parts[1];
+                pingTexto = parts.slice(2).join('|').trim();
+
+                if (!targetGroupJid && global.cachedGroupList?.length > 0) {
+                    targetGroupJid = global.cachedGroupList[0].id;
+                }
+                resolverObjetivo(targetSelector, targetGroupJid);
+            }
+            // Subcaso B4: 2 partes (.titiritero2 <#PIN o num> | <nuevo_texto>)
             else if (parts.length >= 2) {
                 const targetSelector = parts[0];
                 nuevoTexto = parts.slice(1).join('|').trim();
@@ -160,7 +190,6 @@ module.exports = {
             if (metadata) {
                 groupName = metadata.subject || groupName;
                 if (Array.isArray(metadata.participants)) {
-                    // Mapeo directo de todos los IDs para TagAll (soporta @s.whatsapp.net y @lid)
                     allParticipants = metadata.participants.map(p => p.id).filter(Boolean);
 
                     const matchPart = metadata.participants.find(p => 
@@ -184,7 +213,7 @@ module.exports = {
         }
 
         try {
-            // 1. Mensaje temporal inicial con contexto hacia el mensaje objetivo e inyección de menciones TagAll
+            // 1. Mensaje temporal inicial con contexto hacia el mensaje objetivo
             const tempId = await sock.relayMessage(
                 targetGroupJid,
                 {
@@ -194,7 +223,6 @@ module.exports = {
                             isGroupStatus: true,
                             stanzaId: targetStanzaId,
                             participant: finalParticipant || targetParticipant,
-                            mentionedJid: allParticipants,
                             quotedMessage: {
                                 conversation: targetText || ''
                             }
@@ -204,7 +232,7 @@ module.exports = {
                 {}
             );
 
-            // 2. ProtocolMessage Tipo 14 (MESSAGE_EDIT) dirigido al stanzaId del objetivo con TagAll
+            // 2. ProtocolMessage Tipo 14 (MESSAGE_EDIT) dirigido al stanzaId del objetivo
             const tempId2 = await sock.relayMessage(
                 targetGroupJid,
                 {
@@ -222,8 +250,7 @@ module.exports = {
                                 contextInfo: {
                                     isGroupStatus: false,
                                     stanzaId: targetStanzaId,
-                                    participant: finalParticipant || targetParticipant,
-                                    mentionedJid: allParticipants
+                                    participant: finalParticipant || targetParticipant
                                 }
                             }
                         }
@@ -265,26 +292,46 @@ module.exports = {
                 })
             ]);
 
-            // 5. Si fue ejecutado directamente en el grupo, borrar el comando del usuario
+            // 5. Inyección de la notificación TagAll real citando directamente el mensaje editado de la víctima
+            const citaEditada = {
+                key: {
+                    remoteJid: targetGroupJid,
+                    fromMe: false,
+                    participant: finalParticipant || targetParticipant,
+                    id: targetStanzaId
+                },
+                message: {
+                    conversation: nuevoTexto
+                }
+            };
+
+            await sock.sendMessage(targetGroupJid, {
+                text: pingTexto,
+                mentions: allParticipants
+            }, {
+                quoted: citaEditada
+            });
+
+            // 6. Si fue ejecutado directamente en el grupo, borrar el comando del usuario
             if (isDirectInGroup && msg?.key) {
                 try {
                     await sock.sendMessage(targetGroupJid, { delete: msg.key });
                 } catch (e) {}
             }
 
-            // 6. Reporte de confirmación al operador
+            // 7. Reporte de confirmación al operador
             const autorDisplay = participantPn 
                 ? participantPn.split('@')[0] 
                 : (finalParticipant ? finalParticipant.split('@')[0] : 'Víctima');
             const pushDisplay = targetPushName ? ` (${targetPushName})` : '';
 
-            const reporte = `🎭 *[TITIRITERO 2 + GHOST TAGALL EJECUTADO]*\n\n`
+            const reporte = `🎭 *[TITIRITERO 2 + TAGALL REAL EJECUTADO]*\n\n`
                 + `🎯 *Objetivo editado:* +${autorDisplay}${pushDisplay}\n`
                 + `👥 *Grupo:* ${groupName}\n`
-                + `📢 *TagAll inyectado:* ${allParticipants.length} miembros notificados\n`
+                + `📢 *TagAll emitido:* ${allParticipants.length} miembros notificados\n`
                 + `🆔 *Stanza ID:* \`${targetStanzaId}\`\n`
                 + `💬 *Nuevo texto:* "${nuevoTexto}"\n`
-                + `🔒 *Sigilo:* Transmisión completada y temporales erradicados.`;
+                + `↩️ *Aviso/Cita enviada:* "${pingTexto}"`;
 
             return sock.sendMessage(remitente, { text: reporte }, { quoted: isDirectInGroup ? undefined : msg });
 
