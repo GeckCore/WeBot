@@ -25,7 +25,7 @@ export default {
         // 2. Definimos la URL de tu panel de control de forma clara
         const controlPanelUrl = "https://geckcore.github.io/WeBot/";
 
-        const menuTexto = `◢◤ *GECKCORE // HUB*\n\n*Comandos Base:*\n• .menu\n• .sticker / .s\n• .qc texto\n• .readqr\n• .play nombre\n• .ytmp3 enlace\n• .ytmp4 enlace\n• .grupo on/off\n\n*Simulaciones & Mensajes:*\n• .fakequote @user texto|reacción\n• .fakestatus @user texto|respuesta\n• .fakeaudio @user [seg] | [respuesta]\n• .censurar [motivo] (citando mensaje)\n• .sancion @user [motivo] (Aviso oficial de Meta / Advertencia 2 de 3)\n• .factura @user cantidad | concepto\n• h <texto> (fakemessage en vivo citando mensaje)\n• .grupos (Listar grupos vinculados)\n• .mensajes [número] (Ver mensajes del grupo)\n• .titiritero <número> | <texto> (Modificar mensaje ajeno en vivo)\n• .fake3 <número> | <falso> | [resp] (Inyectar cita falsa con ID real)`;
+        const menuTexto = `◢◤ *GECKCORE // HUB*\n\n*Comandos Base:*\n• .menu\n• .sticker / .s\n• .qc texto\n• .readqr\n• .play nombre\n• .ytmp3 enlace\n• .ytmp4 enlace\n• .grupo on/off\n\n*Simulaciones & Mensajes:*\n• .fakequote @user texto|reacción\n• .fakestatus @user texto|respuesta\n• .fakeaudio @user [seg] | [respuesta]\n• .censurar [motivo] (citando mensaje)\n• .factura @user cantidad | concepto\n• h <texto> (fakemessage en vivo citando mensaje)\n• .grupos (Listar grupos vinculados)\n• .mensajes [número] (Ver mensajes del grupo)\n• .titiritero <número> | <texto> (Modificar mensaje ajeno en vivo)\n• .fake3 <número> | <falso> | [resp] (Inyectar cita falsa con ID real)`;
 
         await sock.sendMessage(remitente, {
             text: menuTexto
