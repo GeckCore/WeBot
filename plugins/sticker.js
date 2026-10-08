@@ -163,8 +163,8 @@ module.exports = {
         }
 
         // Configuración de Pack y Autor (Soporta .s Mi Pack | Mi Autor)
-        let packName = process.env.STICKER_PACK || 'WeBot';
-        let authorName = process.env.STICKER_AUTHOR || 'Agostini';
+        let packName = process.env.STICKER_PACK || 'FP de ';
+        let authorName = process.env.STICKER_AUTHOR || 'Jardinería';
 
         const customInput = (textoLimpio || '').replace(/^\.(s|sticker)\s*/i, '').trim();
         if (customInput) {
