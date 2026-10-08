@@ -1,4 +1,5 @@
 // plugins/fakedisappear.js
+const { generateWAMessageFromContent } = require('@whiskeysockets/baileys');
 
 module.exports = {
     name: 'fakedisappear',
@@ -75,14 +76,26 @@ module.exports = {
                 try { await sock.sendMessage(remitente, { delete: msg.key }); } catch (e) {}
             }
 
-            // Opciones de mensaje con envoltura efímera (icono de reloj en WhatsApp)
-            const sendOptions = {
-                ephemeralExpiration: 86400 // 24 horas
+            // Inyección nativa en el contenedor ephemeralMessage de WhatsApp
+            const rawContent = {
+                ephemeralMessage: {
+                    message: {
+                        extendedTextMessage: {
+                            text: textoFinal,
+                            contextInfo: {
+                                expiration: 86400, // 24 horas
+                                ephemeralSettingTimestamp: Math.floor(Date.now() / 1000)
+                            }
+                        }
+                    }
+                }
             };
 
-            await sock.sendMessage(targetJid, {
-                text: textoFinal
-            }, sendOptions);
+            const waMsg = generateWAMessageFromContent(targetJid, rawContent, {
+                userJid: sock.user?.id
+            });
+
+            await sock.relayMessage(targetJid, waMsg.message, { messageId: waMsg.key.id });
 
             if (!isGroup && targetJid !== remitente) {
                 await sock.sendMessage(remitente, {

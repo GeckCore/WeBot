@@ -13,13 +13,13 @@ module.exports = {
         if (!rawInput && !quoted) {
             const ayuda = "❌ *Formato incorrecto.*\n\n"
                 + "📌 *Uso directo en grupo:*\n"
-                + "• `.ghosttag @usuario <mensaje>` (Tag fantasma solo a esa persona)\n"
+                + "• `.ghosttag @usuario <mensaje>` (Mención fantasma solo a esa persona)\n"
                 + "• `.ghosttag <mensaje>` (Ghost Tagall silencioso a todos los miembros)\n\n"
                 + "🌐 *Uso remoto desde chat privado:*\n"
-                + "1. Usa `.grupos` y luego `.mensajes <número>` para ver el grupo y sus personas numeradas.\n"
-                + "2. `.ghosttag <num_persona> | <mensaje>` (Tag fantasma a esa persona)\n"
+                + "1. Usa `.grupos` y luego `.mensajes <número>` para ver el grupo y sus personas con PIN (#XXXX).\n"
+                + "2. `.ghosttag <#PIN o número> | <mensaje>` (Mención fantasma individual)\n"
                 + "3. `.ghosttag <mensaje>` (Ghost Tagall a todo el grupo seleccionado)\n"
-                + "• O directo: `.ghosttag <num_grupo> | <num_persona|all> | <mensaje>`";
+                + "• O directo: `.ghosttag <num_grupo> | <#PIN o número> | <mensaje>`";
             return sock.sendMessage(remitente, { text: ayuda }, { quoted: msg });
         }
 
@@ -45,6 +45,46 @@ module.exports = {
             }
         };
 
+        // Función para resolver un participante a partir de PIN (#18B4), número (1), pushName o JID
+        const resolverParticipante = (selector, groupJid) => {
+            if (!selector) return null;
+            const cleanSel = selector.replace(/^#/, '').trim().toUpperCase();
+            const idx = parseInt(selector, 10) - 1;
+
+            // 1. Buscar en el snapshot congelado de .mensajes
+            const snap = global.lastDisplayedSnapshot;
+            if (snap && (!groupJid || snap.groupJid === groupJid)) {
+                // Por índice [1..N]
+                if (!isNaN(idx) && idx >= 0 && snap.messages[idx]) {
+                    return snap.messages[idx];
+                }
+                // Por PIN (#XXXX) o ID corto
+                const foundSnap = snap.messages.find(m => 
+                    (m.shortId && m.shortId.toUpperCase() === cleanSel) ||
+                    (m.id && m.id.toUpperCase().endsWith(cleanSel)) ||
+                    (m.pushName && m.pushName.toLowerCase().includes(selector.toLowerCase())) ||
+                    (m.participant && m.participant.includes(selector))
+                );
+                if (foundSnap) return foundSnap;
+            }
+
+            // 2. Fallback: Buscar en el buffer de memoria en tiempo real
+            if (groupJid) {
+                const buf = global.recentGroupMessages.get(groupJid) || [];
+                if (!isNaN(idx) && idx >= 0 && buf[idx]) {
+                    return buf[idx];
+                }
+                const foundBuf = buf.find(m => 
+                    (m.id && m.id.toUpperCase().endsWith(cleanSel)) ||
+                    (m.pushName && m.pushName.toLowerCase().includes(selector.toLowerCase())) ||
+                    (m.participant && m.participant.includes(selector))
+                );
+                if (foundBuf) return foundBuf;
+            }
+
+            return null;
+        };
+
         // ==========================================
         // MODO 1: EJECUCIÓN DIRECTA EN GRUPO
         // ==========================================
@@ -53,16 +93,31 @@ module.exports = {
             const mentionedJids = contextInfo?.mentionedJid || [];
             const quotedParticipant = contextInfo?.participant;
 
-            if (mentionedJids.length > 0) {
+            // Si tiene barra vertical en el grupo: .ghosttag #PIN | mensaje o .ghosttag 1 | mensaje
+            const separatorIndex = rawInput.indexOf('|');
+            if (separatorIndex !== -1) {
+                const sel = rawInput.slice(0, separatorIndex).trim();
+                const matched = resolverParticipante(sel, remitente);
+                if (matched) {
+                    targetParticipant = matched.participant;
+                    targetPushName = matched.pushName || '';
+                    textoFinal = rawInput.slice(separatorIndex + 1).trim();
+                } else if (sel.toLowerCase() === 'all' || sel.toLowerCase() === 'todos') {
+                    isTagAll = true;
+                    textoFinal = rawInput.slice(separatorIndex + 1).trim();
+                }
+            }
+
+            if (!textoFinal && mentionedJids.length > 0) {
                 // Etiqueta a la persona mencionada
                 targetParticipant = mentionedJids[0];
                 textoFinal = rawInput.replace(/@\d+/g, '').trim();
-            } else if (quotedParticipant) {
+            } else if (!textoFinal && quotedParticipant) {
                 // Etiqueta al autor del mensaje citado
                 targetParticipant = quotedParticipant;
                 textoFinal = rawInput.trim();
-            } else {
-                // Si no hay mención ni cita, es GHOST TAGALL a todo el grupo
+            } else if (!textoFinal) {
+                // Si no hay mención explícita ni cita ni selector, es GHOST TAGALL
                 isTagAll = true;
                 textoFinal = rawInput.trim();
             }
@@ -74,7 +129,7 @@ module.exports = {
             await asegurarListaGrupos();
             const parts = rawInput.split('|').map(p => p.trim());
 
-            // Caso A: Formato explícito de 3 partes: .ghosttag <num_grupo> | <num_persona o all> | <mensaje>
+            // Caso A: Formato explícito de 3 partes: .ghosttag <num_grupo> | <#PIN o num o all> | <mensaje>
             if (parts.length >= 3 && !isNaN(parseInt(parts[0], 10))) {
                 const groupIdx = parseInt(parts[0], 10);
                 const found = global.cachedGroupList.find(g => g.index === groupIdx);
@@ -88,27 +143,21 @@ module.exports = {
                     }, { quoted: msg });
                 }
 
-                const personaSelector = parts[1].toLowerCase();
+                const personaSelector = parts[1];
                 textoFinal = parts.slice(2).join('|').trim();
 
-                if (personaSelector === 'all' || personaSelector === 'todos') {
+                if (personaSelector.toLowerCase() === 'all' || personaSelector.toLowerCase() === 'todos') {
                     isTagAll = true;
                 } else {
-                    const pIdx = parseInt(personaSelector, 10);
-                    if (!isNaN(pIdx)) {
-                        // Buscar en el snapshot congelado de .mensajes
-                        const snap = global.lastDisplayedSnapshot;
-                        if (snap && snap.groupJid === targetGroupJid && snap.messages[pIdx - 1]) {
-                            targetParticipant = snap.messages[pIdx - 1].participant;
-                            targetPushName = snap.messages[pIdx - 1].pushName || '';
-                        } else {
-                            // Fallback al buffer en tiempo real
-                            const buf = global.recentGroupMessages.get(targetGroupJid) || [];
-                            if (buf[pIdx - 1]) {
-                                targetParticipant = buf[pIdx - 1].participant;
-                                targetPushName = buf[pIdx - 1].pushName || '';
-                            }
-                        }
+                    const matched = resolverParticipante(personaSelector, targetGroupJid);
+                    if (matched) {
+                        targetParticipant = matched.participant;
+                        targetPushName = matched.pushName || '';
+                    } else {
+                        // Si no encuentra a la persona específica, notifica al operador
+                        return sock.sendMessage(remitente, {
+                            text: `❌ Participante [${personaSelector}] no encontrado en el grupo.\n📌 Usa primero \`.mensajes ${groupIdx}\` para ver los PINs y números activos.`
+                        }, { quoted: msg });
                     }
                 }
             }
@@ -128,29 +177,26 @@ module.exports = {
                     }, { quoted: msg });
                 }
 
-                // Subcaso B1: Selecciona persona con barra: .ghosttag <num_persona> | <mensaje>
-                if (parts.length >= 2 && !isNaN(parseInt(parts[0], 10))) {
-                    const pIdx = parseInt(parts[0], 10);
-                    textoFinal = parts.slice(1).join('|').trim();
-
-                    const snap = global.lastDisplayedSnapshot;
-                    if (snap && snap.groupJid === targetGroupJid && snap.messages[pIdx - 1]) {
-                        targetParticipant = snap.messages[pIdx - 1].participant;
-                        targetPushName = snap.messages[pIdx - 1].pushName || '';
+                // Subcaso B1: Tiene barra | (.ghosttag <#PIN o num> | <mensaje>)
+                if (parts.length >= 2) {
+                    const personaSelector = parts[0];
+                    if (personaSelector.toLowerCase() === 'all' || personaSelector.toLowerCase() === 'todos') {
+                        isTagAll = true;
+                        textoFinal = parts.slice(1).join('|').trim();
                     } else {
-                        const buf = global.recentGroupMessages.get(targetGroupJid) || [];
-                        if (buf[pIdx - 1]) {
-                            targetParticipant = buf[pIdx - 1].participant;
-                            targetPushName = buf[pIdx - 1].pushName || '';
+                        const matched = resolverParticipante(personaSelector, targetGroupJid);
+                        if (matched) {
+                            targetParticipant = matched.participant;
+                            targetPushName = matched.pushName || '';
+                            textoFinal = parts.slice(1).join('|').trim();
+                        } else {
+                            // Si el primer segmento no es un selector de persona válido, es Tagall con mensaje
+                            isTagAll = true;
+                            textoFinal = rawInput.trim();
                         }
                     }
                 } 
-                // Subcaso B2: Formato .ghosttag all | <mensaje>
-                else if (parts.length >= 2 && (parts[0].toLowerCase() === 'all' || parts[0].toLowerCase() === 'todos')) {
-                    isTagAll = true;
-                    textoFinal = parts.slice(1).join('|').trim();
-                } 
-                // Subcaso B3: Solo mensaje (.ghosttag <mensaje>) -> Tagall por defecto al grupo seleccionado
+                // Subcaso B2: Sin barra | (.ghosttag <mensaje>) -> Tagall por defecto al grupo seleccionado
                 else {
                     isTagAll = true;
                     textoFinal = rawInput.trim();
@@ -169,15 +215,14 @@ module.exports = {
             let finalMentions = [];
 
             if (isTagAll || !targetParticipant) {
-                // Ghost Tagall: obtener todos los participantes del grupo
+                // Ghost Tagall: obtener todos los participantes del grupo (igual que tagall.js)
                 try {
                     const metadata = await sock.groupMetadata(targetGroupJid);
                     if (metadata) {
                         groupSubject = metadata.subject || groupSubject;
                         if (Array.isArray(metadata.participants)) {
-                            finalMentions = metadata.participants
-                                .map(p => p.id)
-                                .filter(id => id && id.endsWith('@s.whatsapp.net'));
+                            // En Baileys se incluye p.id directamente (soporta @s.whatsapp.net y @lid)
+                            finalMentions = metadata.participants.map(p => p.id).filter(Boolean);
                         }
                     }
                 } catch (e) {
@@ -187,7 +232,7 @@ module.exports = {
             } else {
                 // Ghost tag individual
                 let cleanJid = targetParticipant;
-                // Si es un LID, intentar resolver a número de teléfono
+                // Si es un LID, intentar resolver a número de teléfono si está en la metadata
                 if (cleanJid.endsWith('@lid')) {
                     try {
                         const metadata = await sock.groupMetadata(targetGroupJid).catch(() => null);
@@ -213,7 +258,7 @@ module.exports = {
             // Si se envió desde privado, confirmar al operador
             if (!isGroup) {
                 const modoTxt = isTagAll 
-                    ? `📢 *Ghost Tagall* (${finalMentions.length} miembros)`
+                    ? `📢 *Ghost Tagall* (${finalMentions.length} miembros notificados)`
                     : `🎯 *Ghost Tag Individual* (+${targetParticipant.split('@')[0]}${targetPushName ? ' - ' + targetPushName : ''})`;
 
                 await sock.sendMessage(remitente, {

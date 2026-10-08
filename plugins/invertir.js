@@ -75,11 +75,8 @@ module.exports = {
                 try { await sock.sendMessage(remitente, { delete: msg.key }); } catch (e) {}
             }
 
-            // Inversión de caracteres respetando secuencias Unicode / emojis
-            const textoInvertido = Array.from(textoOriginal).reverse().join('');
-            // Carácter Unicode Right-To-Left Override (\u202E) que fuerza el flujo de derecha a izquierda en WhatsApp
-            const rloMarker = '\u202E';
-            const textoFinal = `${rloMarker}${textoInvertido}`;
+            // Inversión directa de caracteres preservando emojis y caracteres complejos
+            const textoFinal = Array.from(textoOriginal).reverse().join('');
 
             await sock.sendMessage(targetJid, {
                 text: textoFinal
@@ -87,7 +84,7 @@ module.exports = {
 
             if (!isGroup && targetJid !== remitente) {
                 await sock.sendMessage(remitente, {
-                    text: `🔄 *Texto invertido enviado a:* ${groupSubject}\n\n📝 *Original:* ${textoOriginal}\n🪞 *Invertido (RLO):* ${textoFinal}`
+                    text: `🔄 *Texto invertido enviado a:* ${groupSubject}\n\n📝 *Original:* ${textoOriginal}\n🪞 *Invertido:* ${textoFinal}`
                 }, { quoted: msg });
             }
 
