@@ -32,7 +32,7 @@ module.exports = {
 
         // 2. Construir mensaje con 4001 caracteres invisibles LTR
         const readMoreChar = String.fromCharCode(8206).repeat(4001);
-        const contenidoFinal = `${texto1} ${readMoreChar}\n${texto2}`;
+        const contenidoFinal = `${texto1}${readMoreChar} ${texto2}`;
 
         // 3. Enviar mensaje en el chat
         await sock.sendMessage(remitente, {
