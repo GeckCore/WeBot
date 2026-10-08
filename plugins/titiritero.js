@@ -108,21 +108,43 @@ export default {
             }
 
             let texto = `📜 *MENSAJES CAPTURADOS EN: ${groupName}*\n\n`;
-            const mensajesMostrar = buffer.slice(0, 15);
-
-            mensajesMostrar.forEach((m, i) => {
+            const mensajesMostrar = buffer.slice(0, 15).map((m, i) => {
                 const resolved = participantMap.get(m.participant);
                 const realPn = resolved?.pn || (m.participant?.endsWith('@s.whatsapp.net') ? m.participant : '');
                 const phoneDisplay = realPn ? realPn.split('@')[0] : (m.participant ? m.participant.split('@')[0] : 'Desconocido');
                 const nombreDisplay = m.pushName ? ` (${m.pushName})` : '';
+                const shortId = m.id ? m.id.slice(-4).toUpperCase() : `${i + 1}`;
 
-                texto += `*[${i + 1}]* +${phoneDisplay}${nombreDisplay}:\n   💬 "${m.text}"\n   🆔 \`${m.id}\`\n\n`;
+                return {
+                    index: i + 1,
+                    id: m.id,
+                    shortId,
+                    participant: m.participant,
+                    phoneDisplay,
+                    nombreDisplay,
+                    pushName: m.pushName || '',
+                    text: m.text,
+                    timestamp: m.timestamp
+                };
             });
 
-            texto += `🎭 *Acciones disponibles con este grupo:*\n`
-                + `• \`.titiritero <número> | <nuevo_texto>\` (Modifica el mensaje real en vivo)\n`
-                + `• \`.fake3 <número> | <texto_falso> | [respuesta]\` (Inyecta cita falsa atribuida a la víctima)\n`
-                + `_Ejemplo:_ \`.fake3 1 | Yo rompí la taza | ¿Por qué lo hiciste? 😱\``;
+            // Fotograma congelado (Snapshot) para evitar que nuevos mensajes alteren el índice [1..15]
+            global.lastDisplayedSnapshot = {
+                groupJid: targetJid,
+                groupName,
+                timestamp: Date.now(),
+                messages: mensajesMostrar
+            };
+
+            mensajesMostrar.forEach((m) => {
+                texto += `*[${m.index}]* (PIN: *#${m.shortId}*) +${m.phoneDisplay}${m.nombreDisplay}:\n   💬 "${m.text}"\n   🆔 \`${m.id}\`\n\n`;
+            });
+
+            texto += `🎭 *Acciones disponibles (congeladas en pantalla):*\n`
+                + `• \`.titiritero <número|PIN> | <nuevo_texto>\` (Modifica el mensaje real)\n`
+                + `• \`.fake3 <número|PIN> | <texto_falso> | [respuesta]\` (Inyecta cita falsa)\n`
+                + `_Ejemplo:_ \`.fake3 1 | Yo rompí la taza | ¿Por qué lo hiciste? 😱\`\n`
+                + `_O con PIN:_ \`.fake3 #${mensajesMostrar[0]?.shortId || 'A1B2'} | Yo rompí la taza | ¿Por qué?\``;
 
             return sock.sendMessage(remitente, { text: texto }, { quoted: msg });
         }
@@ -171,33 +193,48 @@ export default {
                     }, { quoted: msg });
                 }
 
-                // Selector numérico (ej: "1" o "2")
+                let targetItem = null;
                 const mIdx = parseInt(targetSelector, 10) - 1;
-                if (!isNaN(mIdx) && mIdx >= 0) {
-                    if (!targetGroupJid && global.cachedGroupList?.length > 0) {
-                        targetGroupJid = global.cachedGroupList[0].id;
-                    }
 
-                    if (targetGroupJid) {
-                        const buf = global.recentGroupMessages.get(targetGroupJid) || [];
-                        if (buf[mIdx]) {
-                            targetStanzaId = buf[mIdx].id;
-                            targetParticipant = buf[mIdx].participant;
-                            targetText = buf[mIdx].text;
-                        }
+                if (!targetGroupJid && global.cachedGroupList?.length > 0) {
+                    targetGroupJid = global.cachedGroupList[0].id;
+                }
+
+                // 1. Prioridad máxima: Buscar en el Snapshot congelado de .mensajes (evita que nuevos mensajes cambien de víctima)
+                if (global.lastDisplayedSnapshot && global.lastDisplayedSnapshot.groupJid === targetGroupJid) {
+                    if (!isNaN(mIdx) && mIdx >= 0 && global.lastDisplayedSnapshot.messages[mIdx]) {
+                        targetItem = global.lastDisplayedSnapshot.messages[mIdx];
+                    } else {
+                        const cleanSel = targetSelector.replace(/^#/, '').toUpperCase();
+                        targetItem = global.lastDisplayedSnapshot.messages.find(m => 
+                            m.shortId === cleanSel || 
+                            (m.pushName && m.pushName.toLowerCase().includes(targetSelector.toLowerCase())) ||
+                            (m.id && m.id === targetSelector)
+                        );
                     }
-                } else {
-                    // ID de mensaje directo
+                }
+
+                // 2. Fallback: Buscar en el buffer de memoria en tiempo real
+                if (!targetItem && targetGroupJid) {
+                    const buf = global.recentGroupMessages.get(targetGroupJid) || [];
+                    if (!isNaN(mIdx) && mIdx >= 0 && buf[mIdx]) {
+                        targetItem = buf[mIdx];
+                    } else {
+                        const cleanSel = targetSelector.replace(/^#/, '').toUpperCase();
+                        targetItem = buf.find(m => 
+                            (m.id && m.id.toUpperCase().endsWith(cleanSel)) ||
+                            (m.id && m.id === targetSelector) ||
+                            (m.pushName && m.pushName.toLowerCase().includes(targetSelector.toLowerCase()))
+                        );
+                    }
+                }
+
+                if (targetItem) {
+                    targetStanzaId = targetItem.id;
+                    targetParticipant = targetItem.participant;
+                    targetText = targetItem.text;
+                } else if (targetSelector.length > 10) {
                     targetStanzaId = targetSelector;
-                    // Buscar en buffer para obtener autor
-                    if (targetGroupJid) {
-                        const buf = global.recentGroupMessages.get(targetGroupJid) || [];
-                        const found = buf.find(item => item.id === targetSelector);
-                        if (found) {
-                            targetParticipant = found.participant;
-                            targetText = found.text;
-                        }
-                    }
                 }
             }
 

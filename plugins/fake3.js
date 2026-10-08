@@ -99,37 +99,48 @@ export default {
                 textoFalso = rest.trim();
             }
 
-            // Subcaso A: Dos números ("1 2" -> grupo 1, mensaje 2)
-            const selectorParts = targetSelector.split(/\s+/);
-            if (selectorParts.length === 2 && !isNaN(parseInt(selectorParts[0], 10)) && !isNaN(parseInt(selectorParts[1], 10))) {
-                const gIdx = parseInt(selectorParts[0], 10) - 1;
-                const mIdx = parseInt(selectorParts[1], 10) - 1;
-                if (global.cachedGroupList?.[gIdx]) {
-                    targetGroupJid = global.cachedGroupList[gIdx].id;
-                    const buf = global.recentGroupMessages.get(targetGroupJid) || [];
-                    if (buf[mIdx]) {
-                        targetParticipant = buf[mIdx].participant;
-                        targetPushName = buf[mIdx].pushName || '';
-                    }
+            let targetItem = null;
+            const mIdx = parseInt(targetSelector, 10) - 1;
+
+            if (!targetGroupJid && global.cachedGroupList?.length > 0) {
+                targetGroupJid = global.cachedGroupList[0].id;
+            }
+
+            // 1. Prioridad: Buscar en el Snapshot congelado de .mensajes (evita que Pepito desplace a Juanito)
+            if (global.lastDisplayedSnapshot && global.lastDisplayedSnapshot.groupJid === targetGroupJid) {
+                if (!isNaN(mIdx) && mIdx >= 0 && global.lastDisplayedSnapshot.messages[mIdx]) {
+                    targetItem = global.lastDisplayedSnapshot.messages[mIdx];
+                } else {
+                    const cleanSel = targetSelector.replace(/^#/, '').toUpperCase();
+                    targetItem = global.lastDisplayedSnapshot.messages.find(m => 
+                        m.shortId === cleanSel || 
+                        (m.pushName && m.pushName.toLowerCase().includes(targetSelector.toLowerCase())) ||
+                        (m.id && m.id === targetSelector)
+                    );
                 }
             }
-            // Subcaso B: Un solo número ("1" -> mensaje 1 del grupo actual)
-            else if (!isNaN(parseInt(targetSelector, 10))) {
-                const mIdx = parseInt(targetSelector, 10) - 1;
-                if (!targetGroupJid && global.cachedGroupList?.length > 0) {
-                    targetGroupJid = global.cachedGroupList[0].id;
-                }
 
-                if (targetGroupJid) {
-                    const buf = global.recentGroupMessages.get(targetGroupJid) || [];
-                    if (buf[mIdx]) {
-                        targetParticipant = buf[mIdx].participant;
-                        targetPushName = buf[mIdx].pushName || '';
-                    }
+            // 2. Fallback: Buscar en el buffer de memoria en tiempo real
+            if (!targetItem && targetGroupJid) {
+                const buf = global.recentGroupMessages.get(targetGroupJid) || [];
+                if (!isNaN(mIdx) && mIdx >= 0 && buf[mIdx]) {
+                    targetItem = buf[mIdx];
+                } else {
+                    const cleanSel = targetSelector.replace(/^#/, '').toUpperCase();
+                    targetItem = buf.find(m => 
+                        (m.id && m.id.toUpperCase().endsWith(cleanSel)) ||
+                        (m.id && m.id === targetSelector) ||
+                        (m.pushName && m.pushName.toLowerCase().includes(targetSelector.toLowerCase()))
+                    );
                 }
+            }
+
+            if (targetItem) {
+                targetParticipant = targetItem.participant;
+                targetPushName = targetItem.pushName || '';
             } else {
                 return sock.sendMessage(remitente, {
-                    text: `❌ El selector "${targetSelector}" no es válido. Debe ser un número de \`.mensajes\` (ej: \`.fake3 1 | texto | reaccion\`).`
+                    text: `❌ No se encontró ningún mensaje coincidente con "${targetSelector}".\nUsa un número de \`.mensajes\` (ej: \`.fake3 1 | texto | reaccion\`) o su PIN (ej: \`.fake3 #A1B2 | texto\`).`
                 }, { quoted: msg });
             }
         }
