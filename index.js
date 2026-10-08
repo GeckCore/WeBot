@@ -221,11 +221,15 @@ async function iniciarBot() {
 
     const getMediaInfo = (msgObj) => {
         if (!msgObj) return null;
-        if (msgObj.videoMessage) return { type: 'video', msg: msgObj.videoMessage, ext: 'mp4' };
-        if (msgObj.imageMessage) return { type: 'image', msg: msgObj.imageMessage, ext: 'jpg' };
-        if (msgObj.audioMessage) return { type: 'audio', msg: msgObj.audioMessage, ext: 'ogg' };
-        if (msgObj.documentMessage) return { type: 'document', msg: msgObj.documentMessage, ext: 'bin' };
-        if (msgObj.stickerMessage) return { type: 'sticker', msg: msgObj.stickerMessage, ext: 'webp' };
+        const target = msgObj.viewOnceMessageV2?.message 
+            || msgObj.viewOnceMessage?.message 
+            || msgObj.viewOnceMessageV2Extension?.message 
+            || msgObj;
+        if (target.videoMessage) return { type: 'video', msg: target.videoMessage, ext: 'mp4' };
+        if (target.imageMessage) return { type: 'image', msg: target.imageMessage, ext: 'jpg' };
+        if (target.audioMessage) return { type: 'audio', msg: target.audioMessage, ext: 'ogg' };
+        if (target.documentMessage) return { type: 'document', msg: target.documentMessage, ext: 'bin' };
+        if (target.stickerMessage) return { type: 'sticker', msg: target.stickerMessage, ext: 'webp' };
         return null;
     };
 
@@ -246,6 +250,11 @@ async function iniciarBot() {
                 || msg.message?.extendedTextMessage?.text 
                 || msg.message?.imageMessage?.caption 
                 || msg.message?.videoMessage?.caption 
+                || msg.message?.documentMessage?.caption
+                || msg.message?.viewOnceMessageV2?.message?.imageMessage?.caption
+                || msg.message?.viewOnceMessageV2?.message?.videoMessage?.caption
+                || msg.message?.viewOnceMessage?.message?.imageMessage?.caption
+                || msg.message?.viewOnceMessage?.message?.videoMessage?.caption
                 || '';
             
             // Ignorar comandos para conservar únicamente mensajes de conversación legítimos
@@ -267,7 +276,16 @@ async function iniciarBot() {
             }
         }
         
-        let texto = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
+        let texto = msg.message.conversation 
+            || msg.message.extendedTextMessage?.text 
+            || msg.message.imageMessage?.caption 
+            || msg.message.videoMessage?.caption 
+            || msg.message.documentMessage?.caption 
+            || msg.message.viewOnceMessageV2?.message?.imageMessage?.caption 
+            || msg.message.viewOnceMessageV2?.message?.videoMessage?.caption 
+            || msg.message.viewOnceMessage?.message?.imageMessage?.caption 
+            || msg.message.viewOnceMessage?.message?.videoMessage?.caption 
+            || "";
         let buttonText = "";
         try {
             if (msg?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson) {
@@ -302,7 +320,11 @@ async function iniciarBot() {
             global.lastMsgTimestamps[remitente] = msg.messageTimestamp;
         }
 
-        const msgType = Object.keys(msg.message).find(k => ['videoMessage', 'imageMessage', 'documentMessage', 'audioMessage', 'stickerMessage'].includes(k));
+        const rawContent = msg.message.viewOnceMessageV2?.message 
+            || msg.message.viewOnceMessage?.message 
+            || msg.message.viewOnceMessageV2Extension?.message 
+            || msg.message;
+        const msgType = Object.keys(rawContent).find(k => ['videoMessage', 'imageMessage', 'documentMessage', 'audioMessage', 'stickerMessage'].includes(k));
         const quoted = msg.message.extendedTextMessage?.contextInfo?.quotedMessage;
 
         if (!textoLimpio && !msgType && !buttonText) return;
