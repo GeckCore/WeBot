@@ -28,7 +28,7 @@ function cargarBaseDeDatos() {
     global.db.defaults({ 
         users: {}, 
         chats: {}, 
-        settings: { grupos: defaultGroupsEnabled, autosticker: false },
+        settings: { grupos: defaultGroupsEnabled },
         vigilancia: {} 
     }).write();
 
