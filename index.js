@@ -91,7 +91,7 @@ async function iniciarBot() {
     const pluginsDir = path.join(__dirname, 'plugins');
     if (!fs.existsSync(pluginsDir)) fs.mkdirSync(pluginsDir);
     
-    const pluginFiles = fs.readdirSync(pluginsDir).filter(file => file.endsWith('.js'));
+    const pluginFiles = fs.readdirSync(pluginsDir).filter(file => file.endsWith('.js')).sort();
     
     global.plugins = await Promise.all(pluginFiles.map(async (file) => {
         try {
