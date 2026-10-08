@@ -119,7 +119,10 @@ export default {
                 texto += `*[${i + 1}]* +${phoneDisplay}${nombreDisplay}:\n   💬 "${m.text}"\n   🆔 \`${m.id}\`\n\n`;
             });
 
-            texto += `🎭 *Para modificar un mensaje en vivo:*\n\`.titiritero <número> | <nuevo_texto>\`\n_Ejemplo:_ \`.titiritero 1 | Mañana invito yo las pizzas a todos\``;
+            texto += `🎭 *Acciones disponibles con este grupo:*\n`
+                + `• \`.titiritero <número> | <nuevo_texto>\` (Modifica el mensaje real en vivo)\n`
+                + `• \`.fake3 <número> | <texto_falso> | [respuesta]\` (Inyecta cita falsa atribuida a la víctima)\n`
+                + `_Ejemplo:_ \`.fake3 1 | Yo rompí la taza | ¿Por qué lo hiciste? 😱\``;
 
             return sock.sendMessage(remitente, { text: texto }, { quoted: msg });
         }
