@@ -1,96 +1,106 @@
 export default {
-    name: 'fakequote_v3',
-    match: (text) => /^\.(fake3|fq3|fakequote3)(\s+.*)?$/i.test((text || '').trim()),
+    name: 'suplantacion_cita_v3',
+    match: (text) => /^\.(fake3|fq3|fakequote3)(\s+|$)/i.test((text || '').trim()),
 
-    execute: async ({ sock, msg, remitente, textoLimpio, quoted, msgType }) => {
+    execute: async ({ sock, msg, remitente, textoLimpio, msgType }) => {
         global.cachedGroupList = global.cachedGroupList || [];
         global.recentGroupMessages = global.recentGroupMessages || new Map();
 
-        const match = textoLimpio.match(/^\.(fake3|fq3|fakequote3)(?:\s+(.*))?$/i);
-        const args = (match?.[2] || '').trim();
+        const isGroup = remitente.endsWith('@g.us');
+        let targetGroupJid = isGroup ? remitente : global.lastViewedGroup;
 
-        if (!args && !quoted) {
-            const ayuda = `🎭 *MODO FAKEQUOTE 3.0 (INTERCEPCIÓN INTELIGENTE)*\n\n`
-                + `Inyecta citas falsas atribuidas a cualquier usuario usando los mensajes interceptados en memoria.\n\n`
-                + `📌 *Uso Remoto (desde chat privado):*\n`
-                + `1. Usa \`.grupos\` para ver grupos vinculados.\n`
-                + `2. Usa \`.mensajes 1\` para interceptar mensajes recientes.\n`
-                + `3. Ejecuta:\n`
-                + `   \`.fake3 <número> | <texto_falso> | [respuesta] | [emoji_reacción]\`\n`
-                + `   _Ejemplo:_ \`.fake3 1 | Mañana invito yo las pizzas | ¿En serio? Gracias bro 🍕 | 😋\`\n\n`
-                + `📌 *Uso Directo en Grupo:*\n`
-                + `- Responde a cualquier mensaje de la víctima citándolo con:\n`
-                + `   \`.fake3 <texto_falso> | [respuesta] | [emoji]\`\n`
-                + `   _(El bot eliminará tu comando y publicará la cita falsa)_\n\n`
-                + `📌 *Uso con Mención:* \`.fake3 @usuario texto falso | respuesta\``;
-
-            return sock.sendMessage(remitente, { text: ayuda }, { quoted: msg });
-        }
-
-        let targetGroupJid = remitente.endsWith('@g.us') ? remitente : global.lastViewedGroup;
-        let targetStanzaId = null;
-        let targetParticipant = '';
-        let targetPushName = '';
-        let textoFalso = '';
-        let respuesta = '¿Cómo? 😳';
-        let emojiReaccion = null;
-        let isDirectInGroup = false;
-
-        // ContextInfo de mensaje citado
+        // ContextInfo de cita o mención
         const contextInfo = msg.message?.extendedTextMessage?.contextInfo
             || msg.message?.imageMessage?.contextInfo
             || msg.message?.videoMessage?.contextInfo
             || (msgType ? msg.message?.[msgType]?.contextInfo : null);
 
-        // ==========================================
-        // CASO 1: Ejecutado dentro del grupo respondiendo directamente
-        // ==========================================
-        if (contextInfo?.stanzaId && remitente.endsWith('@g.us')) {
-            targetGroupJid = remitente;
-            targetStanzaId = contextInfo.stanzaId;
-            targetParticipant = contextInfo.participant || '';
-            isDirectInGroup = true;
+        const quotedParticipant = contextInfo?.participant;
+        const mentionedJid = contextInfo?.mentionedJid?.[0];
 
-            const parts = args.split('|').map(p => p.trim());
-            textoFalso = parts[0] || '';
-            if (parts[1]) respuesta = parts[1];
-            if (parts[2]) emojiReaccion = parts[2];
+        // Extraer texto tras el comando
+        const rawInput = textoLimpio.replace(/^\.(fake3|fq3|fakequote3)\s*/i, '').trim();
+
+        // Si no hay argumentos ni mensaje citado, mostrar ayuda interactiva
+        if (!rawInput && !quotedParticipant) {
+            const ayuda = `🎭 *FAKEQUOTE 3.0 (INTERCEPCIÓN REMOTA & DIRECTA)*\n\n`
+                + `Inyecta citas falsas con el exploit en memoria usando la lista de .mensajes o citas en vivo.\n\n`
+                + `📌 *Uso Remoto (desde este chat privado):*\n`
+                + `1. Usa \`.grupos\` para ver grupos vinculados.\n`
+                + `2. Usa \`.mensajes 1\` para ver los miembros y mensajes recientes.\n`
+                + `3. Ejecuta:\n`
+                + `   \`.fake3 <número> | <texto_falso> | [reacción]\`\n`
+                + `   _Ejemplo:_ \`.fake3 1 | Me gusta el pne | como?\`\n\n`
+                + `📌 *Uso Directo en Grupo:*\n`
+                + `- Responde citando cualquier mensaje con:\n`
+                + `   \`.fake3 <texto_falso> | [reacción]\`\n`
+                + `   _(El bot eliminará tu comando en el grupo y publicará la cita falsa)_\n\n`
+                + `📌 *Uso con Mención:* \`.fake3 @usuario texto falso | reacción\``;
+
+            return sock.sendMessage(remitente, { text: ayuda }, { quoted: msg });
+        }
+
+        let targetParticipant = '';
+        let targetPushName = '';
+        let textoFalso = '';
+        let reaccion = 'como?';
+
+        // ==========================================
+        // MODO 1: Citando directamente un mensaje en el grupo
+        // ==========================================
+        if (quotedParticipant) {
+            targetParticipant = quotedParticipant;
+            const separatorIndex = rawInput.indexOf('|');
+            if (separatorIndex !== -1) {
+                textoFalso = rawInput.slice(0, separatorIndex).trim();
+                const customReaccion = rawInput.slice(separatorIndex + 1).trim();
+                if (customReaccion) reaccion = customReaccion;
+            } else {
+                textoFalso = rawInput.trim();
+            }
         }
 
         // ==========================================
-        // CASO 2: Mención explícita (@usuario texto falso | respuesta)
+        // MODO 2: Usando mención explícita (@usuario texto falso | reacción)
         // ==========================================
-        else if (contextInfo?.mentionedJid?.[0]) {
-            targetParticipant = contextInfo.mentionedJid[0];
-            targetStanzaId = '3EB0' + Date.now().toString(16).toUpperCase();
-            if (remitente.endsWith('@g.us')) isDirectInGroup = true;
-
-            const cleanArgs = args.replace(/@\d+/g, '').trim();
-            const parts = cleanArgs.split('|').map(p => p.trim());
-            textoFalso = parts[0] || '';
-            if (parts[1]) respuesta = parts[1];
-            if (parts[2]) emojiReaccion = parts[2];
+        else if (mentionedJid) {
+            targetParticipant = mentionedJid;
+            const cleanInput = rawInput.replace(/@\d+/g, '').trim();
+            const separatorIndex = cleanInput.indexOf('|');
+            if (separatorIndex !== -1) {
+                textoFalso = cleanInput.slice(0, separatorIndex).trim();
+                const customReaccion = cleanInput.slice(separatorIndex + 1).trim();
+                if (customReaccion) reaccion = customReaccion;
+            } else {
+                textoFalso = cleanInput.trim();
+            }
         }
 
         // ==========================================
-        // CASO 3: Selección por número o ID mediante delimitador '|'
+        // MODO 3: Selector numérico desde .mensajes (<número> | <texto> | [reacción])
         // ==========================================
         else {
-            const parts = args.split('|').map(p => p.trim());
-            if (parts.length < 2) {
+            const separatorIndex = rawInput.indexOf('|');
+            if (separatorIndex === -1) {
                 return sock.sendMessage(remitente, {
-                    text: `❌ Formato incompleto.\n📌 *Uso:* \`.fake3 <número_mensaje> | <texto_falso> | [respuesta]\`\n_Ejemplo:_ \`.fake3 1 | Me gusta cantar en la ducha | Jajaja lo sabía\`\nConsulta antes \`.mensajes 1\` para ver los números.`
+                    text: `❌ Formato incorrecto.\n📌 *Uso:* \`.fake3 <número> | <texto_falso> | [reacción]\`\n_Ejemplo:_ \`.fake3 1 | Me gusta el pne | como?\`\nUsa primero \`.mensajes 1\` para ver los números de cada persona.`
                 }, { quoted: msg });
             }
 
-            const targetSelector = parts[0];
-            textoFalso = parts[1] || '';
-            if (parts[2]) respuesta = parts[2];
-            if (parts[3]) emojiReaccion = parts[3];
+            const targetSelector = rawInput.slice(0, separatorIndex).trim();
+            const rest = rawInput.slice(separatorIndex + 1).trim();
 
+            const secondSeparator = rest.indexOf('|');
+            if (secondSeparator !== -1) {
+                textoFalso = rest.slice(0, secondSeparator).trim();
+                const customReaccion = rest.slice(secondSeparator + 1).trim();
+                if (customReaccion) reaccion = customReaccion;
+            } else {
+                textoFalso = rest.trim();
+            }
+
+            // Subcaso A: Dos números ("1 2" -> grupo 1, mensaje 2)
             const selectorParts = targetSelector.split(/\s+/);
-
-            // Subcaso: Selector de grupo y mensaje juntos (ej: "1 2" -> grupo 1, mensaje 2)
             if (selectorParts.length === 2 && !isNaN(parseInt(selectorParts[0], 10)) && !isNaN(parseInt(selectorParts[1], 10))) {
                 const gIdx = parseInt(selectorParts[0], 10) - 1;
                 const mIdx = parseInt(selectorParts[1], 10) - 1;
@@ -98,12 +108,13 @@ export default {
                     targetGroupJid = global.cachedGroupList[gIdx].id;
                     const buf = global.recentGroupMessages.get(targetGroupJid) || [];
                     if (buf[mIdx]) {
-                        targetStanzaId = buf[mIdx].id;
                         targetParticipant = buf[mIdx].participant;
-                        targetPushName = buf[mIdx].pushName;
+                        targetPushName = buf[mIdx].pushName || '';
                     }
                 }
-            } else if (!isNaN(parseInt(targetSelector, 10))) {
+            }
+            // Subcaso B: Un solo número ("1" -> mensaje 1 del grupo actual)
+            else if (!isNaN(parseInt(targetSelector, 10))) {
                 const mIdx = parseInt(targetSelector, 10) - 1;
                 if (!targetGroupJid && global.cachedGroupList?.length > 0) {
                     targetGroupJid = global.cachedGroupList[0].id;
@@ -112,46 +123,33 @@ export default {
                 if (targetGroupJid) {
                     const buf = global.recentGroupMessages.get(targetGroupJid) || [];
                     if (buf[mIdx]) {
-                        targetStanzaId = buf[mIdx].id;
                         targetParticipant = buf[mIdx].participant;
-                        targetPushName = buf[mIdx].pushName;
+                        targetPushName = buf[mIdx].pushName || '';
                     }
                 }
             } else {
-                // Selector como ID directo
-                targetStanzaId = targetSelector;
-                if (targetGroupJid) {
-                    const buf = global.recentGroupMessages.get(targetGroupJid) || [];
-                    const found = buf.find(item => item.id === targetSelector);
-                    if (found) {
-                        targetParticipant = found.participant;
-                        targetPushName = found.pushName;
-                    }
-                }
+                return sock.sendMessage(remitente, {
+                    text: `❌ El selector "${targetSelector}" no es válido. Debe ser un número de \`.mensajes\` (ej: \`.fake3 1 | texto | reaccion\`).`
+                }, { quoted: msg });
             }
         }
 
         if (!targetGroupJid) {
             return sock.sendMessage(remitente, {
-                text: '❌ No hay ningún grupo objetivo seleccionado.\nUsa primero `.grupos` y luego `.mensajes 1` para definir el grupo.'
+                text: '❌ No hay ningún grupo seleccionado.\nUsa primero `.grupos` y `.mensajes 1` para definir el grupo objetivo.'
+            }, { quoted: msg });
+        }
+
+        if (!targetParticipant) {
+            return sock.sendMessage(remitente, {
+                text: '❌ No se encontró a la persona seleccionada en la memoria del grupo.\nEjecuta `.mensajes 1` para actualizar la lista de mensajes.'
             }, { quoted: msg });
         }
 
         if (!textoFalso) {
             return sock.sendMessage(remitente, {
-                text: '❌ Debes indicar el texto falso que deseas atribuir a la víctima.'
+                text: '❌ Escribe el texto falso que quieres hacerle decir a la víctima.'
             }, { quoted: msg });
-        }
-
-        if (!targetStanzaId && !targetParticipant) {
-            return sock.sendMessage(remitente, {
-                text: '❌ No se pudo identificar el mensaje u objetivo en la memoria.\nVerifica el número con `.mensajes 1`.'
-            }, { quoted: msg });
-        }
-
-        // Si no tenemos ID de mensaje, generamos uno con prefijo auténtico de WhatsApp
-        if (!targetStanzaId) {
-            targetStanzaId = '3EB0' + Date.now().toString(16).toUpperCase();
         }
 
         // ==========================================
@@ -159,7 +157,6 @@ export default {
         // ==========================================
         let finalParticipant = targetParticipant;
         let participantPn = '';
-        let participantLid = '';
         let groupSubject = 'Grupo';
 
         try {
@@ -174,7 +171,7 @@ export default {
                     );
                     if (matchPart) {
                         participantPn = matchPart.phoneNumber || (matchPart.id?.endsWith('@s.whatsapp.net') ? matchPart.id : '');
-                        participantLid = matchPart.lid || (matchPart.id?.endsWith('@lid') ? matchPart.id : '');
+                        const participantLid = matchPart.lid || (matchPart.id?.endsWith('@lid') ? matchPart.id : '');
 
                         if (metadata.addressingMode === 'lid' && participantLid) {
                             finalParticipant = participantLid;
@@ -187,59 +184,48 @@ export default {
         } catch (e) {}
 
         try {
-            // Destrucción de evidencia si se ejecutó en grupo
-            if (isDirectInGroup && msg?.key) {
+            // 1. Destrucción de evidencia si se ejecutó dentro del grupo
+            if (isGroup && msg?.key) {
                 try {
                     await sock.sendMessage(remitente, { delete: msg.key });
-                } catch (err) {}
+                } catch (e) {
+                    console.log('[INFO] No se pudo borrar el comando en grupo.');
+                }
             }
 
-            // Construcción del mensaje simulado inyectado
+            // 2. Construcción del exploit en memoria (ID sintético forzando renderizado de texto falso)
+            const fakeId = "3EB0" + Date.now().toString(16).toUpperCase();
             const mensajeInyectado = {
                 key: {
-                    remoteJid: targetGroupJid,
                     fromMe: false,
-                    id: targetStanzaId,
-                    participant: finalParticipant || targetParticipant
+                    participant: finalParticipant,
+                    id: fakeId
                 },
                 message: {
                     conversation: textoFalso
                 }
             };
 
-            // Inyección del FakeQuote en el grupo objetivo
-            const sentMsg = await sock.sendMessage(targetGroupJid, {
-                text: respuesta
+            // 3. Ejecución: El bot responde usando la reacción en el grupo objetivo
+            await sock.sendMessage(targetGroupJid, {
+                text: reaccion
             }, {
                 quoted: mensajeInyectado
             });
 
-            // Reacción emoji opcional
-            if (emojiReaccion && sentMsg?.key) {
-                try {
-                    await sock.sendMessage(targetGroupJid, {
-                        react: {
-                            text: emojiReaccion,
-                            key: sentMsg.key
-                        }
-                    });
-                } catch (e) {}
-            }
-
-            // Reporte privado si se operó remotamente
-            if (!isDirectInGroup) {
+            // 4. Confirmación confidencial al operador si se ejecutó de forma remota
+            if (!isGroup) {
                 const autorDisplay = participantPn
                     ? participantPn.split('@')[0]
                     : (finalParticipant ? finalParticipant.split('@')[0] : 'Víctima');
                 const nombreDisplay = targetPushName ? ` (${targetPushName})` : '';
 
-                const reporte = `🎭 *[FAKEQUOTE INYECTADO]*\n\n`
+                const reporte = `🎭 *[FAKEQUOTE INYECTADO AL GRUPO]*\n\n`
                     + `🎯 *Víctima:* +${autorDisplay}${nombreDisplay}\n`
-                    + `🆔 *Stanza ID vinculada:* \`${targetStanzaId}\`\n`
                     + `💬 *Cita falsa:* "${textoFalso}"\n`
-                    + `🗣️ *Respuesta visible:* "${respuesta}"\n`
-                    + `👥 *Grupo destino:* ${groupSubject}\n`
-                    + `🔒 *Sigilo:* Transmitido remotamente sin rastro de comando en el grupo.`;
+                    + `🗣️ *Reacción/Respuesta:* "${reaccion}"\n`
+                    + `👥 *Grupo:* ${groupSubject}\n`
+                    + `🔒 *Sigilo:* Transmitido remotamente sin dejar rastro de comando en el grupo.`;
 
                 return sock.sendMessage(remitente, { text: reporte }, { quoted: msg });
             }
@@ -247,8 +233,8 @@ export default {
         } catch (err) {
             console.error('[fake3] Error inyectando fakequote:', err);
             return sock.sendMessage(remitente, {
-                text: `❌ Error al inyectar fakequote: ${err.message}`
-            }, { quoted: isDirectInGroup ? undefined : msg });
+                text: `❌ Fallo en inyección fakequote: ${err.message}`
+            }, { quoted: isGroup ? undefined : msg });
         }
     }
 };
