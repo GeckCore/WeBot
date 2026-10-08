@@ -8,7 +8,7 @@ const execFilePromise = util.promisify(execFile);
 const { ensureFfmpegAvailable } = require('../src/utils/ffmpeg');
 
 // --- GENERADOR DE METADATOS EXIF (PACK / AUTOR) PARA WHATSAPP ---
-function createExif(pack = 'WeBot', author = 'Agostini', categories = ['🤖']) {
+function createExif(pack = 'FP de ', author = 'Jardinería', categories = ['🤖']) {
     const json = {
         'sticker-pack-id': 'com.webot.sticker',
         'sticker-pack-name': pack,
@@ -25,7 +25,7 @@ function createExif(pack = 'WeBot', author = 'Agostini', categories = ['🤖']) 
     return Buffer.concat([exifAttr, jsonBuff]);
 }
 
-function addExifToWebp(webpBuffer, pack = 'WeBot', author = 'Agostini') {
+function addExifToWebp(webpBuffer, pack = 'FP de ', author = 'Jardinería') {
     if (!Buffer.isBuffer(webpBuffer) || webpBuffer.length < 12) return webpBuffer;
     if (webpBuffer.slice(0, 4).toString() !== 'RIFF' || webpBuffer.slice(8, 12).toString() !== 'WEBP') {
         return webpBuffer;
@@ -161,6 +161,11 @@ module.exports = {
                 text: "⚠️ Responde a una imagen, video o GIF con *.s*, o envía el archivo con *.s* de comentario." 
             }, { quoted: msg });
         }
+
+        // Eliminación automática del comando (.s) una vez recibido
+        try {
+            await sock.sendMessage(remitente, { delete: msg.key });
+        } catch (e) {}
 
         // Configuración de Pack y Autor (Soporta .s Mi Pack | Mi Autor)
         let packName = process.env.STICKER_PACK || 'FP de ';
