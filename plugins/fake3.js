@@ -153,26 +153,17 @@ export default {
         }
 
         // ==========================================
-        // RESOLUCIÓN DE IDENTIDADES Y MENCIONES MASIVAS (TAGALL / HIDETAG)
+        // RESOLUCIÓN DE IDENTIDADES Y MENCIÓN DIRIGIDA (GHOST TAG A LA VÍCTIMA)
         // ==========================================
         let finalParticipant = targetParticipant;
         let participantPn = '';
         let groupSubject = 'Grupo';
-        const participantes = [];
 
         try {
             const metadata = await sock.groupMetadata(targetGroupJid).catch(() => null);
             if (metadata) {
                 groupSubject = metadata.subject || groupSubject;
                 if (Array.isArray(metadata.participants)) {
-                    // Extraer todos los participantes del grupo para la mención oculta (hidetag)
-                    for (const p of metadata.participants) {
-                        if (p.id) participantes.push(p.id);
-                        if (p.phoneNumber && !participantes.includes(p.phoneNumber)) {
-                            participantes.push(p.phoneNumber);
-                        }
-                    }
-
                     const matchPart = metadata.participants.find(p =>
                         p.id === targetParticipant ||
                         p.lid === targetParticipant ||
@@ -191,6 +182,12 @@ export default {
                 }
             }
         } catch (e) {}
+
+        // Mención invisible dirigida exclusivamente a la víctima (LID + PN para garantizar notificación en su dispositivo)
+        const victimMentions = [finalParticipant];
+        if (participantPn && !victimMentions.includes(participantPn)) {
+            victimMentions.push(participantPn);
+        }
 
         try {
             // 1. Destrucción de evidencia si se ejecutó dentro del grupo
@@ -215,10 +212,10 @@ export default {
                 }
             };
 
-            // 3. Ejecución: El bot responde con la cita falsa e invocación oculta a todos los participantes (hidetag)
+            // 3. Ejecución: El bot responde con la cita falsa y mención fantasma exclusiva a la víctima
             await sock.sendMessage(targetGroupJid, {
                 text: reaccion,
-                mentions: participantes
+                mentions: victimMentions
             }, {
                 quoted: mensajeInyectado
             });
@@ -230,12 +227,12 @@ export default {
                     : (finalParticipant ? finalParticipant.split('@')[0] : 'Víctima');
                 const nombreDisplay = targetPushName ? ` (${targetPushName})` : '';
 
-                const reporte = `🎭 *[FAKEQUOTE + HIDETAG INYECTADO]*\n\n`
-                    + `🎯 *Víctima:* +${autorDisplay}${nombreDisplay}\n`
+                const reporte = `🎭 *[FAKEQUOTE + GHOST TAG INYECTADO]*\n\n`
+                    + `🎯 *Víctima notificada:* +${autorDisplay}${nombreDisplay}\n`
                     + `💬 *Cita falsa:* "${textoFalso}"\n`
                     + `🗣️ *Reacción/Respuesta:* "${reaccion}"\n`
                     + `👥 *Grupo:* ${groupSubject}\n`
-                    + `📢 *Mención masiva:* ${participantes.length} miembros notificados (hidetag oculto).\n`
+                    + `🔔 *Mención dirigida:* Solo la víctima recibió la notificación (ghost tag invisible).\n`
                     + `🔒 *Sigilo:* Transmitido remotamente sin dejar rastro de comando en el grupo.`;
 
                 return sock.sendMessage(remitente, { text: reporte }, { quoted: msg });
