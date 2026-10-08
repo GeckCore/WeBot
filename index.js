@@ -60,6 +60,9 @@ global.sniperTargets = {};
 global.lastMsgTimestamps = {}; 
 global.sesionesVigilia = {}; 
 global.chatHistory = new Map(); // Memoria RAM para Gemini
+global.recentGroupMessages = new Map(); // Buffer de mensajes de grupo para titiritero
+global.lastViewedGroup = null;
+global.cachedGroupList = [];
 global.plugins = [];
 
 const isWindows = process.platform === 'win32';
@@ -232,6 +235,37 @@ async function iniciarBot() {
 
         global.db.data = global.db.getState();
         const remitente = msg.key.remoteJid;
+        
+        // --- CAPTURA DE MENSAJES Y JID DE PARTICIPANTES PARA MODO TITIRITERO ---
+        if (remitente.endsWith('@g.us') && msg.key?.id) {
+            if (!global.recentGroupMessages.has(remitente)) {
+                global.recentGroupMessages.set(remitente, []);
+            }
+            const buffer = global.recentGroupMessages.get(remitente);
+            const msgBody = msg.message?.conversation 
+                || msg.message?.extendedTextMessage?.text 
+                || msg.message?.imageMessage?.caption 
+                || msg.message?.videoMessage?.caption 
+                || '';
+            
+            // Ignorar comandos para conservar únicamente mensajes de conversación legítimos
+            if (msgBody && !msgBody.startsWith('.') && !/^(h|m)\s+/i.test(msgBody)) {
+                const participantJid = msg.key.participant 
+                    || msg.message?.extendedTextMessage?.contextInfo?.participant 
+                    || remitente;
+                
+                buffer.unshift({
+                    id: msg.key.id,
+                    remoteJid: remitente,
+                    participant: participantJid,
+                    pushName: msg.pushName || '',
+                    fromMe: Boolean(msg.key.fromMe),
+                    text: msgBody.slice(0, 150),
+                    timestamp: Date.now()
+                });
+                if (buffer.length > 35) buffer.pop();
+            }
+        }
         
         let texto = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
         let buttonText = "";
