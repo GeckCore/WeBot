@@ -8,19 +8,23 @@ module.exports = {
         global.cachedGroupList = global.cachedGroupList || [];
 
         const isGroup = remitente.endsWith('@g.us');
-        const rawInput = (textoLimpio || '').replace(/^\.(readmore|leermas|rm|spoiler)\s*/i, '').trim();
+        const rawInput = (textoLimpio || '').replace(/^\.(readmore|leermas|rm|spoiler)\s*/i, '');
 
-        if (!rawInput) {
-            const ayuda = "❌ *Formato incorrecto.*\n\n📌 *Uso directo en grupo:*\n• `.readmore <texto visible> | <texto oculto>`\n\n🌐 *Uso remoto desde privado:*\n• Primero usa `.grupos` y `.mensajes <número>`\n• O especifica el grupo: `.readmore <num_grupo> | <visible> | <oculto>`\n\n_Ejemplo:_ `.readmore 1 | Hola a todos | ¡Sorpresa! 🎁`";
+        if (!rawInput.trim()) {
+            const ayuda = "❌ *Formato incorrecto.*\n\n"
+                + "📌 *Uso directo en grupo (múltiples cortes):*\n"
+                + "• `.readmore <visible> | <oculto 1> | <oculto 2> ...`\n"
+                + "_Ejemplo:_ `.readmore hola como es|tas?, yo estoy| bien, queria saber si...`\n\n"
+                + "🌐 *Uso remoto desde privado:*\n"
+                + "1. Selecciona el grupo con `.grupos` y `.mensajes <número>`.\n"
+                + "2. `.readmore <visible> | <oculto 1> | <oculto 2> ...`\n"
+                + "• O explícito: `.readmore <num_grupo> | <visible> | <oculto 1> | ...`";
             return sock.sendMessage(remitente, { text: ayuda }, { quoted: msg });
         }
 
         let targetJid = isGroup ? remitente : null;
         let groupSubject = 'el grupo';
-        let texto1 = '';
-        let texto2 = '';
-
-        const parts = rawInput.split('|').map(p => p.trim());
+        let textSegments = [];
 
         // Función para auto-cargar grupos si la memoria está vacía
         const asegurarListaGrupos = async () => {
@@ -32,100 +36,72 @@ module.exports = {
                         index: index + 1,
                         id: g.id,
                         subject: g.subject || 'Sin nombre',
-                        participantsCount: g.participants?.length || 0
+                        participantsCount: g.participants?.length || 0,
+                        participants: Array.isArray(g.participants) ? g.participants : []
                     }));
                 } catch (e) {}
             }
         };
 
+        const firstSep = rawInput.indexOf('|');
+        if (firstSep === -1) {
+            return sock.sendMessage(remitente, {
+                text: "❌ *Falta el delimitador `|`.*\n📌 *Uso:* `.readmore parte1 | parte2 | parte3...`\n_Ejemplo:_ `.readmore hola como es|tas?, yo estoy| bien, queria saber si...`"
+            }, { quoted: msg });
+        }
+
         if (!isGroup) {
             // MODO REMOTO (Desde chat privado hacia un grupo)
+            await asegurarListaGrupos();
 
-            // Caso A: Formato explícito con número de grupo: .readmore 1 | texto1 | texto2
-            if (parts.length >= 3 && !isNaN(parseInt(parts[0], 10))) {
-                const groupIdx = parseInt(parts[0], 10);
-                await asegurarListaGrupos();
+            const firstPart = rawInput.slice(0, firstSep).trim();
+            const groupIdx = parseInt(firstPart, 10);
 
+            // Caso A: El primer segmento es un número que corresponde a un grupo en caché
+            if (!isNaN(groupIdx) && global.cachedGroupList?.length) {
                 const found = global.cachedGroupList.find(g => g.index === groupIdx);
                 if (found) {
                     targetJid = found.id;
                     groupSubject = found.subject;
                     global.lastViewedGroup = targetJid;
+
+                    const remainder = rawInput.slice(firstSep + 1).replace(/^\s+/, '');
+                    textSegments = remainder.split('|');
+                }
+            }
+
+            // Caso B: No especificó grupo explícito, usar grupo activo o primer grupo
+            if (!targetJid) {
+                if (global.lastViewedGroup) {
+                    targetJid = global.lastViewedGroup;
+                    const found = global.cachedGroupList.find(g => g.id === targetJid);
+                    if (found) groupSubject = found.subject;
+                } else if (global.cachedGroupList?.length > 0) {
+                    targetJid = global.cachedGroupList[0].id;
+                    groupSubject = global.cachedGroupList[0].subject;
+                    global.lastViewedGroup = targetJid;
                 } else {
                     return sock.sendMessage(remitente, {
-                        text: `❌ Grupo [${groupIdx}] no encontrado. Usa \`.grupos\` para ver la lista numerada.`
+                        text: "❌ No hay ningún grupo seleccionado.\n📌 *Uso:* Primero usa `.grupos` y `.mensajes <número>`, o especifica: `.readmore <número_grupo> | parte1 | parte2...`"
                     }, { quoted: msg });
                 }
 
-                texto1 = parts[1];
-                texto2 = parts.slice(2).join('|').trim();
-
-            } else if (parts.length >= 2) {
-                // Caso B: Formato con número pegado: .readmore 1 texto1 | texto2
-                const numMatch = parts[0].match(/^(\d+)\s+(.+)$/);
-                if (numMatch) {
-                    const groupIdx = parseInt(numMatch[1], 10);
-                    await asegurarListaGrupos();
-
-                    const found = global.cachedGroupList.find(g => g.index === groupIdx);
-                    if (found) {
-                        targetJid = found.id;
-                        groupSubject = found.subject;
-                        global.lastViewedGroup = targetJid;
-                        texto1 = numMatch[2].trim();
-                        texto2 = parts.slice(1).join('|').trim();
-                    }
-                }
-
-                // Caso C: Usar el grupo previamente visto con .mensajes <num>
-                if (!targetJid) {
-                    await asegurarListaGrupos();
-                    if (global.lastViewedGroup) {
-                        targetJid = global.lastViewedGroup;
-                        const found = global.cachedGroupList.find(g => g.id === targetJid);
-                        if (found) groupSubject = found.subject;
-                        texto1 = parts[0];
-                        texto2 = parts.slice(1).join('|').trim();
-                    } else if (global.cachedGroupList.length > 0) {
-                        // Por defecto el primer grupo disponible
-                        targetJid = global.cachedGroupList[0].id;
-                        groupSubject = global.cachedGroupList[0].subject;
-                        global.lastViewedGroup = targetJid;
-                        texto1 = parts[0];
-                        texto2 = parts.slice(1).join('|').trim();
-                    } else {
-                        return sock.sendMessage(remitente, {
-                            text: "❌ No hay ningún grupo seleccionado.\n📌 *Uso:* Primero usa `.grupos` y `.mensajes <número>`, o especifica el grupo: `.readmore <número_grupo> | texto1 | texto2`"
-                        }, { quoted: msg });
-                    }
-                }
-
-            } else {
-                return sock.sendMessage(remitente, {
-                    text: "❌ *Falta el delimitador `|`.*\n📌 *Uso:* `.readmore texto1 | texto2` o `.readmore <num_grupo> | texto1 | texto2`"
-                }, { quoted: msg });
+                textSegments = rawInput.split('|');
             }
-
         } else {
-            // MODO DIRECTO (En el propio grupo)
-            if (parts.length < 2) {
-                return sock.sendMessage(remitente, {
-                    text: "❌ *Falta el delimitador `|`.*\n📌 *Uso:* `.readmore texto visible | texto oculto`"
-                }, { quoted: msg });
-            }
-            texto1 = parts[0];
-            texto2 = parts.slice(1).join('|').trim();
+            // MODO DIRECTO EN GRUPO
+            textSegments = rawInput.split('|');
         }
 
-        if (!texto1 || !texto2) {
+        if (textSegments.length < 2) {
             return sock.sendMessage(remitente, {
-                text: "⚠️ Debes incluir tanto el texto visible como el texto oculto.\n_Ejemplo:_ `.readmore Hola | Adiós`"
+                text: "❌ Debes incluir al menos dos partes separadas por `|`.\n_Ejemplo:_ `.readmore visible | oculto`"
             }, { quoted: msg });
         }
 
-        // Construir mensaje con 4001 caracteres invisibles LTR
+        // Construir mensaje uniendo cada corte con 4001 caracteres invisibles LTR
         const readMoreChar = String.fromCharCode(8206).repeat(4001);
-        const contenidoFinal = `${texto1}${readMoreChar} ${texto2}`;
+        const contenidoFinal = textSegments.join(readMoreChar);
 
         try {
             if (isGroup) {
@@ -136,7 +112,7 @@ module.exports = {
                 // En privado: enviar mensaje al grupo destino y confirmar por privado
                 await sock.sendMessage(targetJid, { text: contenidoFinal });
                 await sock.sendMessage(remitente, {
-                    text: `✅ *Mensaje con 'Leer más' enviado a:* ${groupSubject}\n\n👁️ *Texto visible:* ${texto1}\n🔒 *Texto oculto:* ${texto2}`
+                    text: `✅ *Mensaje con ${textSegments.length - 1} 'Leer más' enviado a:* ${groupSubject}\n\n👁️ *Texto visible inicial:* ${textSegments[0].trim()}\n🔒 *Cortes 'Leer más':* ${textSegments.length - 1}`
                 }, { quoted: msg });
             }
         } catch (err) {
