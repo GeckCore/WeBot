@@ -2,13 +2,13 @@
 
 module.exports = {
     name: 'fakewa',
-    match: (text) => /^\.(fakewa|qwa|fakeverificado|whatsappquote)(\s+|$)/i.test((text || '').trim()),
+    match: (text) => /^\.(fakewa|verificado|qwa|fakeverificado|whatsappquote)(\s+.*|$)/i.test((text || '').trim()),
 
     execute: async ({ sock, remitente, msg, textoLimpio }) => {
         global.cachedGroupList = global.cachedGroupList || [];
 
         const isGroup = remitente.endsWith('@g.us');
-        const rawInput = (textoLimpio || '').replace(/^\.(fakewa|qwa|fakeverificado|whatsappquote)\s*/i, '').trim();
+        const rawInput = (textoLimpio || '').replace(/^\.(fakewa|verificado|qwa|fakeverificado|whatsappquote)\s*/i, '').trim();
 
         if (!rawInput) {
             const ayuda = "❌ *Formato incorrecto.*\n\n📌 *Uso directo:*\n• `.fakewa <texto de WhatsApp> | [tu respuesta]`\n_Ejemplo:_ `.fakewa Tu cuenta ha sido verificada con éxito. | Muchas gracias 🙏`\n\n🌐 *Uso remoto a grupo desde privado:*\n• `.fakewa <num_grupo> | <texto de WhatsApp> | [tu respuesta]`\n_O selecciona el grupo previamente con `.grupos` y `.mensajes <número>`._";
