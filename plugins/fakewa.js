@@ -2,7 +2,7 @@
 
 module.exports = {
     name: 'fakewa',
-    match: (text) => /^\.(fakewa|verificado|qwa|fakeverificado|whatsappquote)(\s+.*|$)/i.test((text || '').trim()),
+    match: (text) => /^\.(fakewa|qwa|fakeverificado|whatsappquote)(\s+.*|$)/i.test((text || '').trim()),
 
     execute: async ({ sock, remitente, msg, textoLimpio }) => {
         global.cachedGroupList = global.cachedGroupList || [];
