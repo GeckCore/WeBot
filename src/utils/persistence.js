@@ -28,6 +28,7 @@ let isConnected = false;
 let syncQueue = new Map();
 let syncTimer = null;
 let dbSyncTimer = null;
+let activeWatcher = null;
 
 /**
  * Obtiene la URI de MongoDB desde las variables de entorno.
@@ -71,6 +72,40 @@ async function connectToMongo() {
 }
 
 /**
+ * Elimina completamente los archivos de una sesión en MongoDB Atlas.
+ */
+async function clearCloudSession(sessionId = 'main') {
+    if (!isConnected || !SessionFileModel) {
+        const connected = await connectToMongo();
+        if (!connected || !SessionFileModel) return false;
+    }
+
+    try {
+        const res = await SessionFileModel.deleteMany({ sessionId });
+        console.log(`[PERSISTENCIA] 🗑️ Sesión '${sessionId}' purgada de MongoDB Atlas (${res.deletedCount} archivos eliminados).`);
+        return true;
+    } catch (err) {
+        console.error('[PERSISTENCIA] ❌ Error purgando sesión de MongoDB:', err.message);
+        return false;
+    }
+}
+
+/**
+ * Elimina la carpeta de sesión local de forma segura.
+ */
+function clearLocalSession(authFolder = 'auth_info_baileys') {
+    const authPath = path.resolve(process.cwd(), authFolder);
+    if (fs.existsSync(authPath)) {
+        try {
+            fs.rmSync(authPath, { recursive: true, force: true });
+            console.log(`[PERSISTENCIA] 🧹 Carpeta local ${authFolder} eliminada con éxito.`);
+        } catch (err) {
+            console.error(`[PERSISTENCIA] ❌ Error eliminando carpeta local ${authFolder}:`, err.message);
+        }
+    }
+}
+
+/**
  * Restaura la sesión y la base de datos desde MongoDB antes de que Baileys y LowDB arranquen.
  * @param {string} authFolder - Carpeta local de autenticación (ej: 'auth_info_baileys')
  * @param {string} dbFile - Archivo de base de datos local (ej: 'database.json')
@@ -94,15 +129,28 @@ async function restoreFromCloud(authFolder = 'auth_info_baileys', dbFile = 'data
     try {
         const files = await SessionFileModel.find({ sessionId }).lean();
         if (files && files.length > 0) {
-            for (const fileDoc of files) {
-                const targetFilePath = path.join(authPath, fileDoc.filename);
-                const fileBuffer = fileDoc.isBinary 
-                    ? Buffer.from(fileDoc.data, 'base64') 
-                    : Buffer.from(fileDoc.data, 'utf8');
-                fs.writeFileSync(targetFilePath, fileBuffer);
-                filesRestored++;
+            const hasCreds = files.some(f => f.filename === 'creds.json');
+            if (!hasCreds) {
+                console.warn('[PERSISTENCIA] ⚠️ Archivos detectados en MongoDB pero FALTA creds.json (sesión rota o incompleta). Purgando sesión huérfana...');
+                await SessionFileModel.deleteMany({ sessionId });
+                clearLocalSession(authFolder);
+                console.log('[PERSISTENCIA] ℹ️ MongoDB purgado. Se solicitará vinculación limpia.');
+            } else {
+                // Escritura paralela en lotes para máxima velocidad de arranque
+                const batchSize = 100;
+                for (let i = 0; i < files.length; i += batchSize) {
+                    const batch = files.slice(i, i + batchSize);
+                    await Promise.all(batch.map(fileDoc => {
+                        const targetFilePath = path.join(authPath, fileDoc.filename);
+                        const fileBuffer = fileDoc.isBinary 
+                            ? Buffer.from(fileDoc.data, 'base64') 
+                            : Buffer.from(fileDoc.data, 'utf8');
+                        return fs.promises.writeFile(targetFilePath, fileBuffer);
+                    }));
+                    filesRestored += batch.length;
+                }
+                console.log(`[PERSISTENCIA] ✅ ${filesRestored} archivos de sesión restaurados desde MongoDB.`);
             }
-            console.log(`[PERSISTENCIA] ✅ ${filesRestored} archivos de sesión restaurados desde MongoDB.`);
         } else {
             console.log('[PERSISTENCIA] ℹ️ No se encontraron archivos de sesión previos en MongoDB. Se creará una sesión nueva al vincular QR.');
         }
@@ -191,7 +239,7 @@ function queueFileSync(authFolder, filename, sessionId = 'main') {
 }
 
 /**
- * Sincroniza la carpeta de sesión completa hacia MongoDB.
+ * Sincroniza la carpeta de sesión completa hacia MongoDB y depura archivos obsoletos.
  */
 async function syncEntireSession(authFolder = 'auth_info_baileys', sessionId = 'main') {
     if (!isConnected || !SessionFileModel) return;
@@ -200,11 +248,26 @@ async function syncEntireSession(authFolder = 'auth_info_baileys', sessionId = '
     if (!fs.existsSync(authPath)) return;
 
     try {
-        const files = fs.readdirSync(authPath);
-        for (const file of files) {
-            await persistFileToMongo(authFolder, file, sessionId);
+        const localFiles = fs.readdirSync(authPath);
+        if (localFiles.length === 0) return;
+
+        // 1. Guardar archivos locales en MongoDB en lotes
+        const batchSize = 25;
+        for (let i = 0; i < localFiles.length; i += batchSize) {
+            const batch = localFiles.slice(i, i + batchSize);
+            await Promise.all(batch.map(file => persistFileToMongo(authFolder, file, sessionId)));
         }
-        console.log(`[PERSISTENCIA] ☁️ Sincronizados ${files.length} archivos de sesión con MongoDB.`);
+
+        // 2. Depuración: Eliminar de MongoDB archivos que Baileys ya borró localmente
+        const deleteRes = await SessionFileModel.deleteMany({
+            sessionId,
+            filename: { $nin: localFiles }
+        });
+        if (deleteRes.deletedCount > 0) {
+            console.log(`[PERSISTENCIA] 🧹 Depurados ${deleteRes.deletedCount} archivos obsoletos en MongoDB Atlas.`);
+        }
+
+        console.log(`[PERSISTENCIA] ☁️ Sincronizados ${localFiles.length} archivos de sesión con MongoDB.`);
     } catch (err) {
         console.error('[PERSISTENCIA] Error en sincronización completa:', err.message);
     }
@@ -221,8 +284,13 @@ function initSessionWatcher(authFolder = 'auth_info_baileys', sessionId = 'main'
         fs.mkdirSync(authPath, { recursive: true });
     }
 
+    if (activeWatcher) {
+        try { activeWatcher.close(); } catch (e) {}
+        activeWatcher = null;
+    }
+
     try {
-        fs.watch(authPath, (eventType, filename) => {
+        activeWatcher = fs.watch(authPath, (eventType, filename) => {
             if (filename) {
                 queueFileSync(authFolder, filename, sessionId);
             }
@@ -231,6 +299,22 @@ function initSessionWatcher(authFolder = 'auth_info_baileys', sessionId = 'main'
     } catch (err) {
         console.error('[PERSISTENCIA] No se pudo iniciar fs.watch en sesión:', err.message);
     }
+}
+
+/**
+ * Detiene el observador de sesión y vacía la cola de sincronización.
+ */
+function stopSessionWatcher() {
+    if (syncTimer) {
+        clearTimeout(syncTimer);
+        syncTimer = null;
+    }
+    syncQueue.clear();
+    if (activeWatcher) {
+        try { activeWatcher.close(); } catch (e) {}
+        activeWatcher = null;
+    }
+    console.log('[PERSISTENCIA] ⏹️ Observador de credenciales detenido.');
 }
 
 /**
@@ -259,6 +343,9 @@ module.exports = {
     restoreFromCloud,
     syncEntireSession,
     initSessionWatcher,
+    stopSessionWatcher,
+    clearCloudSession,
+    clearLocalSession,
     queueFileSync,
     syncDatabase,
     isPersistenceEnabled: () => isConnected

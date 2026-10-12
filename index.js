@@ -1,5 +1,5 @@
 require('dotenv').config(); // Esto carga las variables del .env en process.env
-const { default: makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion, downloadContentFromMessage } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion, downloadContentFromMessage, DisconnectReason } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode-terminal');
 const fs = require('fs');
 const path = require('path');
@@ -11,6 +11,9 @@ const {
     restoreFromCloud, 
     syncEntireSession, 
     initSessionWatcher, 
+    stopSessionWatcher,
+    clearCloudSession,
+    clearLocalSession,
     queueFileSync, 
     syncDatabase 
 } = require('./src/utils/persistence');
@@ -83,11 +86,7 @@ if (ffmpegStatus.ok) {
     console.warn(`[WARN] ${ffmpegStatus.message}`);
 }
 
-async function iniciarBot() {
-    // 0. CAPA DE PERSISTENCIA EN LA NUBE (Heroku / MongoDB Atlas)
-    await restoreFromCloud('auth_info_baileys', 'database.json');
-    cargarBaseDeDatos();
-
+async function cargarPlugins() {
     const pluginsDir = path.join(__dirname, 'plugins');
     if (!fs.existsSync(pluginsDir)) fs.mkdirSync(pluginsDir);
     
@@ -104,6 +103,44 @@ async function iniciarBot() {
             console.error(`❌ Error cargando plugin ${file}:`, err.message);
         }
     }
+    console.log(`[PLUGINS] ✅ ${global.plugins.length} plugins cargados.`);
+}
+
+let activeSocket = null;
+let isFirstBoot = true;
+
+async function iniciarBot() {
+    if (activeSocket) {
+        try {
+            activeSocket.ev.removeAllListeners();
+            activeSocket.ws?.close();
+        } catch (e) {}
+        activeSocket = null;
+    }
+
+    if (isFirstBoot) {
+        // Soporte para reset manual de sesión vía variable de entorno en Heroku
+        const forceReset = /^(1|true|yes)$/i.test(process.env.RESET_SESSION || process.env.FORCE_NEW_SESSION || '');
+        if (forceReset) {
+            console.log('[SESIÓN] ⚠️ RESET_SESSION detectado en variables de entorno.');
+            console.log('[SESIÓN] 🧹 Purgando sesión de MongoDB Atlas y almacenamiento local...');
+            stopSessionWatcher();
+            await clearCloudSession('main');
+            clearLocalSession('auth_info_baileys');
+            console.log('[SESIÓN] ✅ Sesión reseteada forzosamente.');
+        }
+
+        // 0. CAPA DE PERSISTENCIA EN LA NUBE (Heroku / MongoDB Atlas)
+        await restoreFromCloud('auth_info_baileys', 'database.json');
+        cargarBaseDeDatos();
+        await cargarPlugins();
+        isFirstBoot = false;
+    } else {
+        const credsPath = path.join(process.cwd(), 'auth_info_baileys', 'creds.json');
+        if (!fs.existsSync(credsPath)) {
+            await restoreFromCloud('auth_info_baileys', 'database.json');
+        }
+    }
 
     const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
     const { version } = await fetchLatestBaileysVersion();
@@ -115,6 +152,25 @@ async function iniciarBot() {
         browser: ['Ubuntu', 'Chrome', '122.0.0.0'], 
         syncFullHistory: false
     });
+    activeSocket = sock;
+
+    // Si no está registrado y existe PAIRING_NUMBER en .env / Heroku Config Vars, solicitar código de emparejamiento
+    if (!state.creds?.registered && process.env.PAIRING_NUMBER) {
+        const phone = process.env.PAIRING_NUMBER.replace(/[^0-9]/g, '');
+        if (phone) {
+            setTimeout(async () => {
+                try {
+                    const code = await sock.requestPairingCode(phone);
+                    console.log('\n======================================================');
+                    console.log(`[VINCULACIÓN] 📲 CÓDIGO DE VINCULACIÓN: ${code}`);
+                    console.log(`[VINCULACIÓN] Introduce este código en WhatsApp.`);
+                    console.log('======================================================\n');
+                } catch (err) {
+                    console.error('[VINCULACIÓN] Error solicitando código de vinculación:', err.message);
+                }
+            }, 3000);
+        }
+    }
 
     sock.ev.on('creds.update', async () => {
         await saveCreds();
@@ -193,13 +249,64 @@ async function iniciarBot() {
     });
 
     sock.ev.on('connection.update', async (update) => {
-        const { connection, qr } = update;
-        if (qr) qrcode.generate(qr, { small: true });
+        const { connection, lastDisconnect, qr } = update;
+        
+        if (qr) {
+            console.log('\n======================================================');
+            console.log('[QR] 📲 ESCANEA ESTE CÓDIGO QR CON WHATSAPP:');
+            qrcode.generate(qr, { small: true });
+            console.log('[QR] 💡 Ve a WhatsApp > Dispositivos vinculados > Vincular dispositivo');
+            console.log('======================================================\n');
+        }
         
         if (connection === 'close') {
-            iniciarBot();
+            const error = lastDisconnect?.error;
+            const statusCode = error?.output?.statusCode 
+                || error?.statusCode 
+                || Number(error?.data?.statusCode)
+                || Number(error?.data?.reason);
+            
+            const errMsg = error?.message || '';
+            const isLoggedOut = statusCode === DisconnectReason.loggedOut // 401
+                || statusCode === DisconnectReason.forbidden // 403
+                || statusCode === DisconnectReason.badSession // 500
+                || statusCode === DisconnectReason.multideviceMismatch // 411
+                || (errMsg.includes('Connection Failure') && (statusCode === 401 || !statusCode || String(error?.data?.reason) === '401'))
+                || (errMsg.includes('Stream Errored') && statusCode === 401);
+
+            console.log(`[CONEXIÓN] 🔌 Conexión cerrada. Código: ${statusCode || 'N/A'}. Motivo: ${errMsg || 'Desconocido'}`);
+
+            if (isLoggedOut) {
+                console.log('----------------------------------------------------');
+                console.log('[SESIÓN] 🚨 SESIÓN CERRADA / INVALIDADA DESDE WHATSAPP');
+                console.log('[SESIÓN] 🧹 Purgando sesión inactiva de MongoDB Atlas y disco local...');
+                
+                stopSessionWatcher();
+                await clearCloudSession('main');
+                clearLocalSession('auth_info_baileys');
+                
+                console.log('[SESIÓN] ✅ Sesión anterior eliminada de la nube y disco.');
+                console.log('[SESIÓN] 🔄 Reiniciando bot para generar nuevo código QR de vinculación...');
+                console.log('----------------------------------------------------');
+
+                try {
+                    sock.ev.removeAllListeners();
+                    sock.ws?.close();
+                } catch (e) {}
+
+                setTimeout(() => iniciarBot(), 2000);
+                return;
+            }
+
+            console.log(`[CONEXIÓN] 🔄 Reconectando en 3 segundos...`);
+            try {
+                sock.ev.removeAllListeners();
+                sock.ws?.close();
+            } catch (e) {}
+
+            setTimeout(() => iniciarBot(), 3000);
         } else if (connection === 'open') {
-            console.log(`[INFO] ¡Conectado! (${global.plugins.length} plugins cargados)`);
+            console.log(`[INFO] ¡Conectado exitosamente! (${global.plugins.length} plugins activos)`);
             
             // Sincronizar estado completo a la nube (Heroku / MongoDB)
             await syncEntireSession('auth_info_baileys');
