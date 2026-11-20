@@ -133,7 +133,7 @@ export default {
                 return send(`❌ Error de red: ${e.message}`);
             }
 
-            // Quitar estado "escribiendo..." (la API ya devolvió los mensajes)
+            // Quitar estado "escribiendo..."
             try { await sock.sendPresenceUpdate('paused', remitente); } catch {}
 
             for (const a of (data.avisos || [])) {
@@ -157,7 +157,8 @@ export default {
                 return;
             }
 
-            remember(msg.key?.id, { stanzaId: msg.key?.id, participant: senderJig, text: payload.mensaje || '' });
+            // CORREGIDO AQUÍ: senderJid en vez de senderJig
+            remember(msg.key?.id, { stanzaId: msg.key?.id, participant: senderJid, text: payload.mensaje || '' });
 
             const useQuote = Boolean(quotedMessage && stanzaId);
             if (useQuote) { try { await sock.sendMessage(remitente, { delete: msg.key }); } catch {} }
@@ -173,7 +174,6 @@ export default {
                     ctxToUse = { stanzaId, participant: quotedPart || senderJid, quotedMessage };
                 }
                 try {
-                    // Volver a poner "escribiendo..." entre burbujas para que se vea natural
                     try { await sock.sendPresenceUpdate('composing', remitente); } catch {}
                     await delay(300);
                     
