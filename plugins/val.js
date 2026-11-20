@@ -86,8 +86,8 @@ async function checkHealthOnce() {
 
 // ─── Plugin ──────────────────────────────────────────────
 export default {
-    name: 'val',
-    match: (text) => /^\.val(\s+|$)/i.test((text || '').trim()),
+    name: 'vale',
+    match: (text) => /^\.vale(\s+|$)/i.test((text || '').trim()),
 
     execute: async ({ sock, remitente, msg, textoLimpio }) => {
         if (!API_KEY) {
@@ -99,7 +99,7 @@ export default {
         await checkHealthOnce();
 
         const isGroup  = remitente.endsWith('@g.us');
-        const userText = (textoLimpio || '').replace(/^\.val\s*/i, '').trim();
+        const userText = (textoLimpio || '').replace(/^\.vale\s*/i, '').trim();
 
         const ctx =
             msg.message?.extendedTextMessage?.contextInfo
